@@ -390,6 +390,7 @@ mod tests {
     }
 
     #[cfg(windows)]
+    #[cfg(not(feature = "epic-write-test"))]
     #[test]
     fn epic_write_is_rejected_before_backend_and_memory_is_unchanged() {
         let fm = FmProcess {
@@ -406,6 +407,30 @@ mod tests {
         assert_eq!(fm.read_bytes(addr, 2).unwrap(), value);
         let error = fm.write_bytes(addr, &[0, 0]).unwrap_err();
         assert!(error.contains("no write was attempted"));
+        assert_eq!(value, [0x12, 0x34]);
+    }
+
+    /// With the attended-test feature on, the build gate is intentionally
+    /// open; a read-only OS handle must then be the barrier that stops the
+    /// write and leaves memory untouched.
+    #[cfg(windows)]
+    #[cfg(feature = "epic-write-test")]
+    #[test]
+    fn with_write_test_feature_epic_write_stops_at_the_read_only_handle() {
+        let fm = FmProcess {
+            handle: backend::open_read_only(std::process::id()).unwrap(),
+            pid: std::process::id(),
+            gp_base: 0,
+            gp_end: 0,
+            module_path: String::new(),
+            build: GameBuild::Fm24Epic,
+            dll_hash_notice: None,
+        };
+        let mut value = std::hint::black_box([0x12u8, 0x34]);
+        let addr = value.as_mut_ptr() as u64;
+        assert_eq!(fm.read_bytes(addr, 2).unwrap(), value);
+        let error = fm.write_bytes(addr, &[0, 0]).unwrap_err();
+        assert!(!error.contains("no write was attempted"));
         assert_eq!(value, [0x12, 0x34]);
     }
 

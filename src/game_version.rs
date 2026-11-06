@@ -140,9 +140,11 @@ impl GameBuild {
     }
 
     /// Epic field layouts and edit/Undo have not been verified in-game.
-    /// Enforce this at both the UI and process boundary.
+    /// Enforce this at both the UI and process boundary. The `epic-write-test`
+    /// cargo feature lifts the lock for the attended `epic_edit_test`
+    /// diagnostic on a designated test save (docs/fm24/epic-preview.md).
     pub fn allows_writes(self) -> bool {
-        !matches!(self, GameBuild::Fm24Epic)
+        !matches!(self, GameBuild::Fm24Epic) || cfg!(feature = "epic-write-test")
     }
 
     /// The per-build schema bundle (field lists, RVAs, sizes).
@@ -210,16 +212,27 @@ mod tests {
     }
 
     #[test]
-    fn epic_is_read_only_and_does_not_resolve_to_steam() {
+    fn epic_resolves_separately_from_steam_with_distinct_fingerprint() {
         let epic = GameBuild::resolve(GameVersion::Fm24, Storefront::Epic).unwrap();
         assert_eq!(epic, GameBuild::Fm24Epic);
-        assert!(!epic.allows_writes());
-        assert!(GameBuild::Fm24Steam.allows_writes());
         assert!(GameBuild::resolve(GameVersion::Fm26, Storefront::Epic).is_err());
         assert_ne!(
             epic.schemas().known_dll_hash,
             GameBuild::Fm24Steam.schemas().known_dll_hash
         );
         assert_ne!(epic.schemas().known_dll_hash, 0);
+    }
+
+    #[cfg(not(feature = "epic-write-test"))]
+    #[test]
+    fn epic_is_read_only_by_default() {
+        assert!(!GameBuild::Fm24Epic.allows_writes());
+        assert!(GameBuild::Fm24Steam.allows_writes());
+    }
+
+    #[cfg(feature = "epic-write-test")]
+    #[test]
+    fn epic_write_test_feature_enables_epic_writes() {
+        assert!(GameBuild::Fm24Epic.allows_writes());
     }
 }

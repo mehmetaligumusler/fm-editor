@@ -637,7 +637,8 @@ impl FmEditorApp {
     }
 
     fn undo_unavailable_reason(&self) -> Option<String> {
-        if self.attached_build == Some(GameBuild::Fm24Epic) {
+        if self.attached_build == Some(GameBuild::Fm24Epic) && !GameBuild::Fm24Epic.allows_writes()
+        {
             return Some("Epic preview is read-only; editing and Undo are disabled.".into());
         }
         match self.conn {
@@ -1335,7 +1336,9 @@ impl eframe::App for FmEditorApp {
                 if self.change_history.is_pending() {
                     ui.spinner();
                     ui.label("Applying changes to game memory…");
-                } else if self.attached_build == Some(GameBuild::Fm24Epic) {
+                } else if self.attached_build == Some(GameBuild::Fm24Epic)
+                    && !GameBuild::Fm24Epic.allows_writes()
+                {
                     ui.label("Epic preview — read-only. Field readings are experimental; editing is disabled.");
                 } else if self.editing_allowed() {
                     ui.label("Editing live — changes apply immediately. Ctrl+Z to undo.");
@@ -2205,6 +2208,7 @@ fn editor_title(build: Option<GameBuild>, branch: Option<&str>) -> String {
 mod title_tests {
     use super::*;
 
+    #[cfg(not(feature = "epic-write-test"))]
     #[test]
     fn connected_epic_preview_never_enables_editing_or_undo() {
         let mut app = FmEditorApp::from_settings(AppSettings::default());
@@ -2217,6 +2221,20 @@ mod title_tests {
         assert!(app.editing_allowed());
         app.conn = ConnState::Disconnected;
         assert!(!app.editing_allowed());
+    }
+
+    #[cfg(feature = "epic-write-test")]
+    #[test]
+    fn epic_write_test_feature_lifts_the_connected_epic_lock() {
+        let mut app = FmEditorApp::from_settings(AppSettings::default());
+        app.auto_connect = false;
+        app.conn = ConnState::Ready(123);
+        app.attached_build = Some(GameBuild::Fm24Epic);
+        assert!(app.editing_allowed());
+        assert_ne!(
+            app.undo_unavailable_reason(),
+            Some("Epic preview is read-only; editing and Undo are disabled.".into())
+        );
     }
 
     #[test]

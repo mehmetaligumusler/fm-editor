@@ -9,7 +9,8 @@ offsets are read-only research candidates, not independently confirmed mappings.
 The UI labels all Epic readings experimental and disables editing and Undo.
 `FmProcess::write_bytes` rejects every Epic write. On Windows the Epic process
 handle has VM_READ and QUERY_LIMITED_INFORMATION only, so the OS also refuses
-writes. There is no command-line switch to bypass these restrictions.
+writes. The only bypass is the `epic-write-test` cargo feature below, which
+exists solely for the attended verification diagnostic and must never ship.
 
 The user's live career is not a test save. Do not use the repository's historical
 Linux test-save assumptions on this computer. The user is continuing gameplay:
@@ -37,6 +38,32 @@ All three roots and vtable values agree with the Steam candidates, but that does
 not prove the validity of every entity field or write operation. Counts can
 change during gameplay. Cached ages inherit the existing FM24 season-year
 approximation; they are not reliable current-save ages.
+
+## Attended write/Undo verification procedure
+
+The `epic-write-test` cargo feature plus the `epic_edit_test` diagnostic run
+the verification against a designated TEST save while the user watches every
+value in game. The write commands refuse to run unless the attached build is
+Fm24Epic and the feature lifted the lock.
+
+1. Copy the save files to a backup folder before starting.
+2. Load the TEST save in game and wait until it is fully loaded.
+3. `cargo run --features epic-write-test --bin epic_edit_test -- find <name>`
+   resolves entity names to UIDs (read-only).
+4. `attr show <uid> <key>` prints the current raw and displayed value; the
+   user confirms it matches the in-game screen before anything is written.
+5. `attr set <uid> <key> <value>` compare-and-swap writes: memory is re-read
+   immediately before the write, a changed value aborts, and the written
+   bytes are read back afterwards. The user confirms the new value renders
+   in game.
+6. `attr restore <uid> <key> <old>` writes the previous value back through
+   the same guarded path; the user confirms restoration.
+7. Never save in game while an edit is unverified or unrestored.
+
+`budget show/set/restore <club-uid>` runs the same round trip for the club
+transfer budget through the finance sub-record. Record the witnesses
+(entity, field, before/after values, date) in this file before lifting the
+default write lock for the build.
 
 ## Verification still required before editing support
 
