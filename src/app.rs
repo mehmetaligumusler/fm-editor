@@ -632,7 +632,14 @@ impl FmEditorApp {
         }
     }
 
+    fn editing_allowed(&self) -> bool {
+        self.conn.is_writable() && self.attached_build.is_some_and(GameBuild::allows_writes)
+    }
+
     fn undo_unavailable_reason(&self) -> Option<String> {
+        if self.attached_build == Some(GameBuild::Fm24Epic) {
+            return Some("Epic preview is read-only; editing and Undo are disabled.".into());
+        }
         match self.conn {
             ConnState::Ready(_) => self.change_history.undo_reason(),
             ConnState::WaitingForSave(_) => Some("Wait for a loaded save before undoing.".into()),
@@ -1022,7 +1029,7 @@ impl eframe::App for FmEditorApp {
         navigation::publish_cache(ctx, cache_arc.clone());
         navigation::set_editing_enabled(
             ctx,
-            self.conn.is_writable() && !self.change_history.is_pending(),
+            self.editing_allowed() && !self.change_history.is_pending(),
         );
         let wage_period = self.settings.wage_period;
         let face_pack_path = self.settings.face_pack_path.clone();
@@ -1328,7 +1335,9 @@ impl eframe::App for FmEditorApp {
                 if self.change_history.is_pending() {
                     ui.spinner();
                     ui.label("Applying changes to game memory…");
-                } else if self.conn.is_writable() {
+                } else if self.attached_build == Some(GameBuild::Fm24Epic) {
+                    ui.label("Epic preview — read-only. Field readings are experimental; editing is disabled.");
+                } else if self.editing_allowed() {
                     ui.label("Editing live — changes apply immediately. Ctrl+Z to undo.");
                 } else {
                     ui.label("Read-only — editing is disabled until a game and save are connected.");
@@ -1544,7 +1553,7 @@ impl eframe::App for FmEditorApp {
                                     edit_entity = self.attached_build.map(|build| history_club_entity(c, build));
                                     let (e,action) = club_panel::show(schemas,ui,c,&mut self.club_tab,&mut self.policy_ui,
                                         self.attached_build.is_some_and(|b|b.version()==crate::game_version::GameVersion::Fm27),
-                                        self.conn.is_writable() && !self.change_history.is_pending() && edits.is_empty());
+                                        self.conn.is_writable() && self.attached_build.is_some_and(GameBuild::allows_writes) && !self.change_history.is_pending() && edits.is_empty());
                                     edits.extend(e);policy_action=action;
                                 } else {
                                     ui.label("Club details unavailable. Reload while the game is connected.");
@@ -1599,7 +1608,7 @@ impl eframe::App for FmEditorApp {
                             } else if let Some(ref mut mgr) = self.manager_view {
                                 edit_entity = Some(history_staff_entity(mgr, true));
                                 let e = staff_panel::show_manager(schemas, self.game_date, ui, mgr, &mut self.names);
-                                if self.conn.is_writable() {
+                                if self.editing_allowed() {
                                     edits.extend(e);
                                 }
                             } else {
@@ -1672,7 +1681,7 @@ impl eframe::App for FmEditorApp {
 
         // A write becomes undoable only after the worker confirms success.
         if let Some(action) = policy_action
-            && self.conn.is_writable()
+            && self.editing_allowed()
             && !self.change_history.is_pending()
             && edits.is_empty()
         {
@@ -1747,7 +1756,7 @@ impl eframe::App for FmEditorApp {
         }
         if !edits.is_empty() {
             let actions = history_actions(edits);
-            if self.conn.is_writable() && !self.change_history.is_pending() && edit_entity.is_some()
+            if self.editing_allowed() && !self.change_history.is_pending() && edit_entity.is_some()
             {
                 for cmd in self
                     .change_history
@@ -2195,6 +2204,20 @@ fn editor_title(build: Option<GameBuild>, branch: Option<&str>) -> String {
 #[cfg(test)]
 mod title_tests {
     use super::*;
+
+    #[test]
+    fn connected_epic_preview_never_enables_editing_or_undo() {
+        let mut app = FmEditorApp::from_settings(AppSettings::default());
+        app.auto_connect = false;
+        app.conn = ConnState::Ready(123);
+        app.attached_build = Some(GameBuild::Fm24Epic);
+        assert!(!app.editing_allowed());
+        assert!(app.undo_unavailable_reason().unwrap().contains("read-only"));
+        app.attached_build = Some(GameBuild::Fm24Steam);
+        assert!(app.editing_allowed());
+        app.conn = ConnState::Disconnected;
+        assert!(!app.editing_allowed());
+    }
 
     #[test]
     fn attached_version_and_worktree_are_both_visible() {

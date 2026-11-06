@@ -77,30 +77,42 @@ fn detect_build(pid: u32) -> Result<GameBuild, String> {
     };
     let version = sniff_version(&sniff_path)?;
     let storefront = match &exe_path {
+        Ok(exe) if has_epic_marker(exe) => Storefront::Epic,
         Ok(exe) => storefront_of(exe, has_gdk_config(exe)),
         Err(_) => storefront_of(&sniff_path, false),
     };
     GameBuild::resolve(version, storefront).map_err(|e| format!("{e} ({sniff_path})"))
 }
 
-/// True when a `MicrosoftGame.config` (the Microsoft GDK package manifest
-/// every Game Pass PC title ships) sits next to the exe.
+/// Require two Epic markers when recognising a custom installation directory.
+fn has_epic_marker(exe_path: &str) -> bool {
+    std::path::Path::new(exe_path)
+        .parent()
+        .is_some_and(|dir| dir.join(".egstore").is_dir() && dir.join("epic.txt").is_file())
+}
+
+/// True when Microsoft's GDK manifest sits next to the exe.
 fn has_gdk_config(exe_path: &str) -> bool {
     let dir = match exe_path.rfind(['/', '\\']) {
         Some(i) => &exe_path[..i],
         None => return false,
     };
-    std::path::Path::new(dir).join("MicrosoftGame.config").is_file()
+    std::path::Path::new(dir)
+        .join("MicrosoftGame.config")
+        .is_file()
 }
 
 /// Storefront of an install, from its exe (or module) path and whether the
 /// GDK manifest sits next to the exe. Game Pass installs live under an
 /// `XboxGames` folder (any drive, the Xbox app default) or, for older Store
-/// packages, `Program Files\WindowsApps`; anything else is the Steam build.
+/// packages, `Program Files\WindowsApps`. Epic's default install path is also
+/// recognised; .egstore + epic.txt markers handle custom Epic install paths.
 fn storefront_of(path: &str, has_gdk_config: bool) -> Storefront {
     let lower = path.to_lowercase().replace('\\', "/");
     if has_gdk_config || lower.contains("/xboxgames/") || lower.contains("/windowsapps/") {
         Storefront::GamePass
+    } else if lower.contains("/epic games/") {
+        Storefront::Epic
     } else {
         Storefront::Steam
     }
@@ -138,7 +150,11 @@ impl FmProcess {
             _ => Err(format!(
                 "{} games are running: {}. Choose one by PID.",
                 games.len(),
-                games.iter().map(ToString::to_string).collect::<Vec<_>>().join(", "),
+                games
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", "),
             )),
         }
     }
@@ -146,8 +162,12 @@ impl FmProcess {
     /// Attach to the game with this PID. The schema comes from that
     /// process's own install path, never from any other attachment.
     pub fn attach_pid(pid: u32) -> Result<Self, String> {
-        let handle = backend::open(pid)?;
         let build = detect_build(pid)?;
+        let handle = if build.allows_writes() {
+            backend::open(pid)?
+        } else {
+            backend::open_read_only(pid)?
+        };
         let module = build.version().module_name();
         let (gp_base, gp_size, gp_path) = backend::find_module_info(pid, module)?;
         // Probe one read up front so a blocked cross-process access path
@@ -272,6 +292,9 @@ impl FmProcess {
 
     /// Write bytes to the target process at `addr`.
     pub fn write_bytes(&self, addr: u64, data: &[u8]) -> Result<(), String> {
+        if !self.build.allows_writes() {
+            return Err("FM24 Epic preview is read-only; no write was attempted".into());
+        }
         backend::write_bytes(&self.handle, addr, data)
     }
 
@@ -294,8 +317,7 @@ impl FmProcess {
         if len == 0 || len > 256 {
             return Err(format!("bad name length: {len}"));
         }
-        String::from_utf8(buf[4..4 + len].to_vec())
-            .map_err(|e| format!("name UTF-8 error: {e}"))
+        String::from_utf8(buf[4..4 + len].to_vec()).map_err(|e| format!("name UTF-8 error: {e}"))
     }
 }
 
@@ -307,15 +329,22 @@ impl FmProcess {
 fn sniff_version(dll_path: &str) -> Result<GameVersion, String> {
     let lower = dll_path.to_lowercase();
     // Match both "Football Manager 2026" and "Football Manager 26" naming conventions.
-    if lower.contains("2027") || lower.contains("manager 27") {
+    if lower.contains("2027") || lower.contains("manager 27") || lower.contains("footballmanager27")
+    {
         Ok(GameVersion::Fm27)
-    } else if lower.contains("2026") || lower.contains("manager 26") {
+    } else if lower.contains("2026")
+        || lower.contains("manager 26")
+        || lower.contains("footballmanager26")
+    {
         Ok(GameVersion::Fm26)
-    } else if lower.contains("2024") || lower.contains("manager 24") {
+    } else if lower.contains("2024")
+        || lower.contains("manager 24")
+        || lower.contains("footballmanager24")
+    {
         Ok(GameVersion::Fm24)
     } else {
         Err(format!(
-            "cannot determine game version from game_plugin.dll path: {dll_path}"
+            "cannot determine game version from game module path: {dll_path}"
         ))
     }
 }
@@ -348,10 +377,36 @@ mod tests {
 
     #[test]
     fn running_game_label_names_build_and_pid() {
-        let game = RunningGame { pid: 4242, build: GameBuild::Fm27Steam };
+        let game = RunningGame {
+            pid: 4242,
+            build: GameBuild::Fm27Steam,
+        };
         assert_eq!(game.to_string(), "FM27 (PID 4242)");
-        let game = RunningGame { pid: 4242, build: GameBuild::Fm27GamePass };
+        let game = RunningGame {
+            pid: 4242,
+            build: GameBuild::Fm27GamePass,
+        };
         assert_eq!(game.to_string(), "FM27 Game Pass (PID 4242)");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn epic_write_is_rejected_before_backend_and_memory_is_unchanged() {
+        let fm = FmProcess {
+            handle: backend::open_read_only(std::process::id()).unwrap(),
+            pid: std::process::id(),
+            gp_base: 0,
+            gp_end: 0,
+            module_path: String::new(),
+            build: GameBuild::Fm24Epic,
+            dll_hash_notice: None,
+        };
+        let mut value = std::hint::black_box([0x12u8, 0x34]);
+        let addr = value.as_mut_ptr() as u64;
+        assert_eq!(fm.read_bytes(addr, 2).unwrap(), value);
+        let error = fm.write_bytes(addr, &[0, 0]).unwrap_err();
+        assert!(error.contains("no write was attempted"));
+        assert_eq!(value, [0x12, 0x34]);
     }
 
     #[test]
@@ -360,6 +415,18 @@ mod tests {
         let fm27 = r"S:\SteamLibrary\steamapps\common\Football Manager 27\data\game_plugin.dll";
         assert_eq!(sniff_version(fm24), Ok(GameVersion::Fm24));
         assert_eq!(sniff_version(fm27), Ok(GameVersion::Fm27));
+        assert_eq!(
+            sniff_version(r"C:\Program Files\Epic Games\FootballManager24\fm.exe"),
+            Ok(GameVersion::Fm24)
+        );
+        assert_eq!(
+            sniff_version(r"D:\Games\FootballManager26\game_plugin.dll"),
+            Ok(GameVersion::Fm26)
+        );
+        assert_eq!(
+            sniff_version(r"D:\Games\FootballManager27\game_plugin.dll"),
+            Ok(GameVersion::Fm27)
+        );
         assert!(sniff_version(r"C:\Games\fm.exe").is_err());
     }
 
@@ -370,11 +437,21 @@ mod tests {
         let xbox = r"D:\XboxGames\Football Manager 27\Content\fm.exe";
         let store = r"C:\Program Files\WindowsApps\SportsInteractive.FM27_1.0.0.0_x64__abc\fm.exe";
         assert_eq!(storefront_of(steam, false), Storefront::Steam);
+        assert_eq!(
+            storefront_of(
+                r"C:\Program Files\Epic Games\FootballManager24\fm.exe",
+                false
+            ),
+            Storefront::Epic
+        );
         assert_eq!(storefront_of(proton, false), Storefront::Steam);
         assert_eq!(storefront_of(xbox, false), Storefront::GamePass);
         assert_eq!(storefront_of(store, false), Storefront::GamePass);
         // A moved Game Pass install is still recognised by its GDK manifest.
-        assert_eq!(storefront_of(r"E:\Games\FM27\fm.exe", true), Storefront::GamePass);
+        assert_eq!(
+            storefront_of(r"E:\Games\FM27\fm.exe", true),
+            Storefront::GamePass
+        );
     }
 
     #[test]

@@ -1,5 +1,9 @@
 # FM24 Memory Layout
 
+The separate [Epic read-only preview](epic-preview.md) records Windows Epic
+build detection, array-root observations, fingerprint and verification limits.
+The Steam field witnesses below must not be treated as Epic verification.
+
 Mapped 2026-10-22 against a fresh FM24 save (day 0, 3 Jul 2023) under Proton.
 The code is the source of truth (`src/fields/fm24/`); this file holds the
 discovery context, witnesses and what is still unmapped.

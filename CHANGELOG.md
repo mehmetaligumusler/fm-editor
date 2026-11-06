@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+
+- FM24 Epic (Windows): **read-only preview** for the Epic Games Store build (product version `24.4.2+2081827`). Epic installs are recognised by their `.egstore`/`epic.txt` markers or the default install path, attach with an OS read-only handle (`VM_READ` only) and a pinned module fingerprint, and browse players, staff and clubs using the inherited Steam field offsets. Editing and Undo stay disabled at both the UI and `write_bytes` boundary until Epic field mappings are witnessed in game on a test save; see `docs/fm24/epic-preview.md`.
+
 ## 0.4.0 (prerelease)
 
 ### Features

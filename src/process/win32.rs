@@ -9,7 +9,9 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW, PROCESSENTRY32W,
     Process32FirstW, Process32NextW, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32, TH32CS_SNAPPROCESS,
 };
-use windows::Win32::System::Threading::{OpenProcess, PROCESS_ALL_ACCESS};
+use windows::Win32::System::Threading::{
+    OpenProcess, PROCESS_ALL_ACCESS, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+};
 
 /// Owns the Win32 process handle; closed on drop.
 pub struct ProcHandle {
@@ -29,6 +31,19 @@ pub fn open(pid: u32) -> Result<ProcHandle, String> {
     let handle = unsafe {
         OpenProcess(PROCESS_ALL_ACCESS, false, pid)
             .map_err(|e| format!("OpenProcess failed: {e}"))?
+    };
+    Ok(ProcHandle { handle })
+}
+
+/// Read-only builds never acquire VM_WRITE or VM_OPERATION rights.
+pub fn open_read_only(pid: u32) -> Result<ProcHandle, String> {
+    let handle = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+            false,
+            pid,
+        )
+        .map_err(|e| format!("OpenProcess (read-only) failed: {e}"))?
     };
     Ok(ProcHandle { handle })
 }
@@ -158,6 +173,16 @@ pub fn find_module_info(pid: u32, module_name: &str) -> Result<(u64, u64, String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_only_handle_reads_but_os_refuses_writes_to_test_process() {
+        let handle = open_read_only(std::process::id()).unwrap();
+        let mut bytes = std::hint::black_box([0xA5u8, 0x1A, 0xFF, 0x07]);
+        let addr = bytes.as_mut_ptr() as u64;
+        assert_eq!(read_bytes(&handle, addr, bytes.len()).unwrap(), bytes);
+        assert!(write_bytes(&handle, addr, &[0; 4]).is_err());
+        assert_eq!(bytes, [0xA5, 0x1A, 0xFF, 0x07]);
+    }
 
     #[test]
     fn reads_exact_bytes_from_the_test_process_and_rejects_unmapped_memory() {

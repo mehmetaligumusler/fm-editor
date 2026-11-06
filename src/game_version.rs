@@ -21,7 +21,7 @@
 //! its arms in the `GameBuild` matches, and its schema static under
 //! `crate::fields::`.
 
-use crate::fields::{fm24, fm26, fm27, VersionedSchemas};
+use crate::fields::{VersionedSchemas, fm24, fm26, fm27};
 
 /// Which Football Manager release a process is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,14 +61,15 @@ impl GameVersion {
     }
 }
 
-/// Where a game install came from. Anything not recognised as Game Pass is
-/// treated as the Steam build, which is what every schema was mapped
-/// against (on Windows and under Proton).
+/// Where a game install came from. Epic and Game Pass are resolved separately
+/// from Steam; an unknown storefront retains the historical Steam fallback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Storefront {
     Steam,
     /// PC Game Pass / Microsoft Store (Xbox app) install.
     GamePass,
+    /// Epic Games Store; currently a read-only FM24 research preview.
+    Epic,
 }
 
 impl Storefront {
@@ -77,6 +78,7 @@ impl Storefront {
         match self {
             Storefront::Steam => "Steam",
             Storefront::GamePass => "Game Pass",
+            Storefront::Epic => "Epic Games",
         }
     }
 }
@@ -87,6 +89,7 @@ impl Storefront {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameBuild {
     Fm24Steam,
+    Fm24Epic,
     Fm26Steam,
     Fm27Steam,
     /// Starts as a copy of the FM27 Steam schema; nothing in it has been
@@ -96,8 +99,9 @@ pub enum GameBuild {
 
 impl GameBuild {
     /// Every build with a schema.
-    pub const ALL: [GameBuild; 4] = [
+    pub const ALL: [GameBuild; 5] = [
         GameBuild::Fm24Steam,
+        GameBuild::Fm24Epic,
         GameBuild::Fm26Steam,
         GameBuild::Fm27Steam,
         GameBuild::Fm27GamePass,
@@ -121,7 +125,7 @@ impl GameBuild {
 
     pub fn version(self) -> GameVersion {
         match self {
-            GameBuild::Fm24Steam => GameVersion::Fm24,
+            GameBuild::Fm24Steam | GameBuild::Fm24Epic => GameVersion::Fm24,
             GameBuild::Fm26Steam => GameVersion::Fm26,
             GameBuild::Fm27Steam | GameBuild::Fm27GamePass => GameVersion::Fm27,
         }
@@ -129,17 +133,23 @@ impl GameBuild {
 
     pub fn storefront(self) -> Storefront {
         match self {
-            GameBuild::Fm24Steam | GameBuild::Fm26Steam | GameBuild::Fm27Steam => {
-                Storefront::Steam
-            }
+            GameBuild::Fm24Steam | GameBuild::Fm26Steam | GameBuild::Fm27Steam => Storefront::Steam,
             GameBuild::Fm27GamePass => Storefront::GamePass,
+            GameBuild::Fm24Epic => Storefront::Epic,
         }
+    }
+
+    /// Epic field layouts and edit/Undo have not been verified in-game.
+    /// Enforce this at both the UI and process boundary.
+    pub fn allows_writes(self) -> bool {
+        !matches!(self, GameBuild::Fm24Epic)
     }
 
     /// The per-build schema bundle (field lists, RVAs, sizes).
     pub fn schemas(self) -> &'static VersionedSchemas {
         match self {
             GameBuild::Fm24Steam => &fm24::FM24,
+            GameBuild::Fm24Epic => &fm24::FM24_EPIC,
             GameBuild::Fm26Steam => &fm26::FM26,
             GameBuild::Fm27Steam => &fm27::FM27,
             GameBuild::Fm27GamePass => &fm27::FM27_GAMEPASS,
@@ -151,6 +161,7 @@ impl GameBuild {
     pub fn schema_name(self) -> &'static str {
         match self {
             GameBuild::Fm24Steam => "FM24",
+            GameBuild::Fm24Epic => "FM24_EPIC",
             GameBuild::Fm26Steam => "FM26",
             GameBuild::Fm27Steam => "FM27",
             GameBuild::Fm27GamePass => "FM27_GAMEPASS",
@@ -163,6 +174,7 @@ impl GameBuild {
     pub fn display_name(self) -> &'static str {
         match self {
             GameBuild::Fm27GamePass => "FM27 Game Pass",
+            GameBuild::Fm24Epic => "FM24 Epic (read-only preview)",
             other => other.version().display_name(),
         }
     }
@@ -175,7 +187,10 @@ mod tests {
     #[test]
     fn resolve_round_trips_every_build() {
         for build in GameBuild::ALL {
-            assert_eq!(GameBuild::resolve(build.version(), build.storefront()), Ok(build));
+            assert_eq!(
+                GameBuild::resolve(build.version(), build.storefront()),
+                Ok(build)
+            );
         }
     }
 
@@ -192,5 +207,19 @@ mod tests {
                 assert!(!std::ptr::eq(a.schemas(), b.schemas()), "{a:?} / {b:?}");
             }
         }
+    }
+
+    #[test]
+    fn epic_is_read_only_and_does_not_resolve_to_steam() {
+        let epic = GameBuild::resolve(GameVersion::Fm24, Storefront::Epic).unwrap();
+        assert_eq!(epic, GameBuild::Fm24Epic);
+        assert!(!epic.allows_writes());
+        assert!(GameBuild::Fm24Steam.allows_writes());
+        assert!(GameBuild::resolve(GameVersion::Fm26, Storefront::Epic).is_err());
+        assert_ne!(
+            epic.schemas().known_dll_hash,
+            GameBuild::Fm24Steam.schemas().known_dll_hash
+        );
+        assert_ne!(epic.schemas().known_dll_hash, 0);
     }
 }

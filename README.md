@@ -61,6 +61,11 @@ Live name/UID filtering, ability and age filters, and sortable results.
 
 ## Supported versions
 
+This local branch adds an **FM24 Epic Windows read-only preview** for product
+version `24.4.2+2081827`. It has a separate fingerprint gate, reads with an OS
+read-only handle, and disables all editing and Undo. Field readings inherited
+from Steam remain experimental. See [Epic observations and limits](docs/fm24/epic-preview.md).
+
 | Game | Status | Notes |
 |------|--------|-------|
 | FM24 | Players, staff, clubs, stadiums | [docs/fm24/memory-layout.md](docs/fm24/memory-layout.md) |
