@@ -297,7 +297,13 @@ pub fn category_column(
 ) {
     ui.strong(ui.tr(heading));
     ui.add_space(6.0);
-    let fields = schemas.fields_for_category(entity, category);
+    // FM's own screens list attributes alphabetically by the localized name;
+    // the schema order is discovery order. Sort per language so the editor
+    // matches the game's on-screen order exactly (Turkish alphabetical under
+    // Türkçe, English alphabetical under English).
+    let ctx = ui.ctx().clone();
+    let mut fields = schemas.fields_for_category(entity, category);
+    fields.sort_by_cached_key(|f| crate::i18n::tr(&ctx, f.label));
     for f in &fields {
         if let Some(edit) = render_field(ui, f, raw, entity_addr) {
             edits.push(edit);

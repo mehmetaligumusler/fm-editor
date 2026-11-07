@@ -184,30 +184,30 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("Ability", "Yetenek"),
         // ── Technical attributes (FM Turkish) ─────────────────────────────
         ("Corners", "Korner"),
-        ("Crossing", "Orta"), // witnessed 2026-11-07
-        ("Dribbling", "Çalım"),
+        ("Crossing", "Orta Yapma"), // witnessed 2026-11-08 game screen
+        ("Dribbling", "Dripling"),
         ("Finishing", "Bitiricilik"),   // witnessed 2026-11-07
-        ("First Touch", "İlk Dokunuş"), // witnessed 2026-11-07
-        ("Free Kicks", "Serbest Vuruş"),
+        ("First Touch", "İlk Kontrol"), // witnessed 2026-11-08 game screen
+        ("Free Kicks", "Serbest Vuruş Kullanma"),
         ("Heading", "Kafa Vuruşu"), // witnessed 2026-11-07
-        ("Long Shots", "Uzun Şutlar"),
-        ("Long Throws", "Uzun Taçlar"),
+        ("Long Shots", "Uzaktan Şut"),
+        ("Long Throws", "Uzun Taç"),
         ("Marking", "Markaj"),
         ("Passing", "Pas"), // witnessed 2026-11-07
-        ("Penalty Taking", "Penaltı"),
+        ("Penalty Taking", "Penaltı Kullanma"),
         ("Tackling", "Top Kapma"), // witnessed 2026-11-07
         ("Technique", "Teknik"),   // witnessed 2026-11-07
         // ── Mental attributes ─────────────────────────────────────────────
-        ("Aggression", "Saldırganlık"),
-        ("Anticipation", "Öngörü"),
+        ("Aggression", "Agresiflik"),
+        ("Anticipation", "Önsezi"),
         ("Bravery", "Cesaret"),
         ("Composure", "Soğukkanlılık"),
         ("Concentration", "Konsantrasyon"),
-        ("Decisions", "Karar Verme"),
+        ("Decisions", "Karar Alma"),
         ("Determination", "Kararlılık"),
-        ("Flair", "Doğaçlama"),
+        ("Flair", "Özel Yetenek"),
         ("Leadership", "Liderlik"),
-        ("Off The Ball", "Topsuz Oyun"),
+        ("Off The Ball", "Topsuz Alan"),
         ("Positioning", "Pozisyon Alma"),
         ("Teamwork", "Takım Oyunu"),
         ("Vision", "Vizyon"),
@@ -217,7 +217,7 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("Agility", "Çeviklik"),
         ("Balance", "Denge"),
         ("Jumping Reach", "Zıplama"),
-        ("Natural Fitness", "Doğal Kondisyon"),
+        ("Natural Fitness", "Vücut Zindeliği"),
         ("Pace", "Hız"),
         ("Stamina", "Dayanıklılık"),
         ("Strength", "Güç"),
@@ -250,7 +250,7 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("Nation", "Ülke"),
         ("Nationality", "Uyruk"),
         ("Height", "Boy"),
-        ("Weight", "Kilo"),
+        ("Weight", "Ağırlık"),
         ("Left Foot", "Sol Ayak"),
         ("Right Foot", "Sağ Ayak"),
         ("International Caps", "Milli Maç"),
@@ -418,8 +418,13 @@ mod tests {
     fn turkish_uses_fm_game_terms_for_witnessed_fields() {
         let ctx = ctx_with(Language::Turkish);
         assert_eq!(tr(&ctx, "Finishing"), "Bitiricilik");
-        assert_eq!(tr(&ctx, "First Touch"), "İlk Dokunuş");
+        assert_eq!(tr(&ctx, "First Touch"), "İlk Kontrol");
+        assert_eq!(tr(&ctx, "Dribbling"), "Dripling");
+        assert_eq!(tr(&ctx, "Crossing"), "Orta Yapma");
         assert_eq!(tr(&ctx, "Passing"), "Pas");
+        assert_eq!(tr(&ctx, "Aggression"), "Agresiflik");
+        assert_eq!(tr(&ctx, "Anticipation"), "Önsezi");
+        assert_eq!(tr(&ctx, "Natural Fitness"), "Vücut Zindeliği");
         assert_eq!(tr(&ctx, "Transfer Budget"), "Transfer Bütçesi");
         assert_eq!(tr(&ctx, "Players"), "Oyuncular");
     }
