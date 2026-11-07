@@ -250,7 +250,7 @@ impl FmEditorApp {
             club_tab: club_panel::ClubTab::Overview,
             manager_view: None,
             manager_loading: false,
-            change_history: ChangeHistory::new(),
+            change_history: ChangeHistory::load(&history_path()),
             history_ui: Default::default(),
             write_error: None,
             policy_ui: Default::default(),
@@ -360,6 +360,10 @@ impl FmEditorApp {
         while let Some(result) = self.bridge.try_recv() {
             match result {
                 BridgeResult::Connected(pid, counts, game_date) => {
+                    // Same game still running? Revive undo payloads from the
+                    // previous editor run (every write keeps its CAS guard).
+                    self.change_history.note_pid(pid);
+                    self.change_history.revive_session(pid);
                     self.game_date = game_date;
                     self.clear_entity_state("Save ready: previous editing context closed");
                     self.clear_cache();
@@ -1035,7 +1039,10 @@ impl eframe::App for FmEditorApp {
                     });
                     ui.separator();
                     let mut rts = self.settings.reload_on_tab_switch;
-                    if ui.checkbox(&mut rts, &ui.tr("Reload on tab switch")).changed() {
+                    if ui
+                        .checkbox(&mut rts, &ui.tr("Reload on tab switch"))
+                        .changed()
+                    {
                         self.settings.reload_on_tab_switch = rts;
                         self.settings.save();
                     }
@@ -1050,7 +1057,9 @@ impl eframe::App for FmEditorApp {
                             }
                             ui.close_menu();
                         }
-                        if self.settings.face_pack_path.is_some() && ui.button(ui.tr("Clear")).clicked() {
+                        if self.settings.face_pack_path.is_some()
+                            && ui.button(ui.tr("Clear")).clicked()
+                        {
                             self.settings.face_pack_path = None;
                             self.settings.save();
                             ui.close_menu();
@@ -1682,11 +1691,20 @@ impl eframe::App for FmEditorApp {
         // Reports cannot write: only latest-action Undo and identity-checked navigation.
         let undo_reason = self.undo_unavailable_reason();
         let undo_label = self.change_history.undo_label();
+        let undoable_ids: std::collections::HashSet<crate::edit_history::ActionId> = self
+            .change_history
+            .reports()
+            .iter()
+            .map(|report| report.id)
+            .filter(|id| self.change_history.undoable(*id))
+            .collect();
+        let mut undo_listed: Option<Vec<crate::edit_history::ActionId>> = None;
         let history_action = self.history_ui.show(
             ctx,
             self.change_history.reports(),
-            crate::ui::edit_history::HistoryUiContext {
+            &crate::ui::edit_history::HistoryUiContext {
                 current_session: self.change_history.session_id(),
+                undoable_ids,
                 current_entity: edit_entity.as_ref(),
                 undo_label: undo_label.as_deref(),
                 undo_reason: undo_reason.as_deref(),
@@ -1696,6 +1714,9 @@ impl eframe::App for FmEditorApp {
         );
         match history_action {
             Some(crate::ui::edit_history::HistoryAction::UndoLatest) => undo_requested = true,
+            Some(crate::ui::edit_history::HistoryAction::UndoListed(ids)) => {
+                undo_listed = Some(ids)
+            }
             Some(crate::ui::edit_history::HistoryAction::OpenEntity(target)) => {
                 history_open_entity = Some(target)
             }
@@ -1811,6 +1832,20 @@ impl eframe::App for FmEditorApp {
                 Err(reason) => self.write_error = Some(reason),
             }
         }
+        if let Some(ids) = undo_listed.take() {
+            if edits.is_empty() && self.undo_unavailable_reason().is_none() {
+                match self.change_history.undo_actions(&ids) {
+                    Ok(commands) => {
+                        for cmd in commands {
+                            self.bridge.send(cmd);
+                        }
+                    }
+                    Err(reason) => self.write_error = Some(reason),
+                }
+            }
+        }
+        // The audit trail persists across editor restarts.
+        self.change_history.save_if_dirty(&history_path());
         if !edits.is_empty() {
             let actions = history_actions(edits);
             if self.editing_allowed() && !self.change_history.is_pending() && edit_entity.is_some()
@@ -2245,6 +2280,13 @@ fn cached_staff_view(cached: &CachedStaff, build: GameBuild) -> StaffView {
         contract_raw: None,
         contract_addr: None,
     }
+}
+
+fn history_path() -> std::path::PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("fm-editor")
+        .join("history.json")
 }
 
 fn editor_title(build: Option<GameBuild>, branch: Option<&str>) -> String {

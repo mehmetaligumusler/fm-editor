@@ -9,7 +9,7 @@ use crate::undo::UndoEntry;
 pub type ActionId = u64;
 pub type SessionId = u64;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum EntityKind {
     Player,
     Staff,
@@ -28,7 +28,7 @@ impl EntityKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EntityRef {
     pub kind: EntityKind,
     pub build: GameBuild,
@@ -39,7 +39,7 @@ pub struct EntityRef {
 }
 
 /// Explicit grouping within a single submission, never a time/frame heuristic.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EditGroup {
     pub key: String,
     pub label: String,
@@ -64,7 +64,7 @@ impl EditGroup {
 }
 
 /// Human values come from the producing widget, not parsed description strings.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EditPresentation {
     pub field: String,
     pub before: String,
@@ -102,13 +102,13 @@ pub struct ActionDraft {
     pub changes: Vec<ChangeDraft>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Operation {
     Apply,
     Undo,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AttemptOutcome {
     Pending,
     Confirmed,
@@ -117,7 +117,7 @@ pub enum AttemptOutcome {
     Interrupted,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AttemptReport {
     pub operation: Operation,
     pub started_at: SystemTime,
@@ -126,7 +126,7 @@ pub struct AttemptReport {
     pub message: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ChangeReport {
     pub field: String,
     pub before: String,
@@ -137,7 +137,7 @@ pub struct ChangeReport {
     pub attempts: Vec<AttemptReport>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ActionStatus {
     Applying,
     Applied,
@@ -168,10 +168,14 @@ impl ActionStatus {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ActionReport {
     pub id: ActionId,
     pub session_id: SessionId,
+    /// PID of the game process the action was written to; used to revive
+    /// undo payloads after an editor restart when the same game still runs.
+    #[serde(default)]
+    pub pid: u32,
     pub entity: EntityRef,
     pub label: String,
     pub before: String,
@@ -208,6 +212,37 @@ pub struct ChangeHistory {
     tracker: WriteTracker,
     session: SessionId,
     last_action: ActionId,
+    /// Game PID stamped onto new reports (set on every attach).
+    pid: u32,
+    /// True when the stored history file needs rewriting.
+    dirty: bool,
+    /// Undo payloads loaded from disk, revivable when the same game PID
+    /// reconnects. Keyed by (action id, change index).
+    revivable: HashMap<(ActionId, usize), StoredPayload>,
+    /// Highest action id ever seen, so restored runs never reuse ids.
+    restored_max_action: ActionId,
+}
+
+/// Disk mirror of one undo payload. `Instant` is not portable across
+/// processes; it is recreated on revive.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct StoredPayload {
+    pub description: String,
+    pub addr: u64,
+    pub old_raw: Vec<u8>,
+    pub new_raw: Vec<u8>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredHistory {
+    version: u32,
+    actions: Vec<StoredAction>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredAction {
+    report: ActionReport,
+    payloads: Vec<(usize, StoredPayload)>,
 }
 
 impl Default for ChangeHistory {
@@ -225,7 +260,184 @@ impl ChangeHistory {
             tracker: WriteTracker::new(),
             session: 1,
             last_action: 0,
+            pid: 0,
+            dirty: false,
+            revivable: HashMap::new(),
+            restored_max_action: 0,
         }
+    }
+
+    /// Stamp the attached game PID onto subsequently submitted reports.
+    pub fn note_pid(&mut self, pid: u32) {
+        self.pid = pid;
+    }
+
+    /// Load the persisted audit trail. Reports are always visible; undo
+    /// payloads become revivable only when the same game PID reconnects
+    /// (every revived write still passes the compare-and-swap guard).
+    pub fn load(path: &std::path::Path) -> Self {
+        let mut history = Self::new();
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return history;
+        };
+        let Ok(stored) = serde_json::from_str::<StoredHistory>(&text) else {
+            return history;
+        };
+        if stored.version != 1 {
+            return history;
+        }
+        for action in stored.actions {
+            history.restored_max_action = history.restored_max_action.max(action.report.id);
+            for (index, payload) in action.payloads {
+                history.revivable.insert((action.report.id, index), payload);
+            }
+            history.reports.push(action.report);
+        }
+        history.last_action = history.restored_max_action;
+        // Loaded reports belong to earlier sessions; start a fresh one above.
+        let max_session = history
+            .reports
+            .iter()
+            .map(|r| r.session_id)
+            .max()
+            .unwrap_or(0);
+        history.session = max_session + 1;
+        history.dirty = false;
+        history
+    }
+
+    /// Persist after any mutation. Cheap no-op when clean.
+    pub fn save_if_dirty(&mut self, path: &std::path::Path) {
+        if !self.dirty {
+            return;
+        }
+        let stored = StoredHistory {
+            version: 1,
+            actions: self
+                .reports
+                .iter()
+                .map(|report| {
+                    let payloads = (0..report.changes.len())
+                        .filter_map(|index| {
+                            self.payloads
+                                .get(&(report.id, index))
+                                .map(|entry| (index, stored_payload(entry)))
+                                .or_else(|| {
+                                    self.revivable
+                                        .get(&(report.id, index))
+                                        .cloned()
+                                        .map(|p| (index, p))
+                                })
+                        })
+                        .collect();
+                    StoredAction {
+                        report: report.clone(),
+                        payloads,
+                    }
+                })
+                .collect(),
+        };
+        if let Ok(text) = serde_json::to_string(&stored) {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(path, text);
+            self.dirty = false;
+        }
+    }
+
+    /// A new game session connected: revive undo payloads recorded against
+    /// the same PID (same game still running, addresses still meaningful).
+    pub fn revive_session(&mut self, pid: u32) {
+        if pid == 0 {
+            return;
+        }
+        let ids: Vec<ActionId> = self
+            .reports
+            .iter()
+            .filter(|r| r.pid == pid && r.session_closed.is_none())
+            .map(|r| r.id)
+            .collect();
+        for id in ids {
+            let revive: Vec<usize> = (0..self
+                .reports
+                .iter()
+                .find(|r| r.id == id)
+                .map_or(0, |r| r.changes.len()))
+                .filter(|index| self.revivable.contains_key(&(id, *index)))
+                .collect();
+            let has_any = !revive.is_empty();
+            for index in revive {
+                if let Some(payload) = self.revivable.remove(&(id, index)) {
+                    self.payloads.insert(
+                        (id, index),
+                        UndoEntry {
+                            description: payload.description,
+                            addr: payload.addr,
+                            old_raw: payload.old_raw,
+                            new_raw: payload.new_raw,
+                            timestamp: std::time::Instant::now(),
+                            policy_guard: None,
+                        },
+                    );
+                }
+            }
+            if has_any {
+                if let Some(report) = self.reports.iter_mut().find(|r| r.id == id) {
+                    report.session_id = self.session;
+                    report.undo_unavailable_reason = None;
+                }
+            }
+        }
+        self.dirty = true;
+    }
+
+    /// True when the action can be undone right now (same live session,
+    /// not pending, undo payload retained).
+    pub fn undoable(&self, id: ActionId) -> bool {
+        self.reports.iter().any(|r| r.id == id && self.eligible(r))
+    }
+
+    /// Undo specific actions, newest-first as ordered by the caller. Skips
+    /// actions that are not eligible; fails when none are.
+    pub fn undo_actions(&mut self, ids: &[ActionId]) -> Result<Vec<BridgeCmd>, String> {
+        if let Some(reason) = self.undo_reason() {
+            return Err(reason);
+        }
+        let now = SystemTime::now();
+        let mut commands = Vec::new();
+        let mut undone_any = false;
+        for &action_id in ids {
+            let Some(report) = self.reports.iter().find(|r| r.id == action_id) else {
+                continue;
+            };
+            if !self.eligible(report) {
+                continue;
+            }
+            undone_any = true;
+            let report = self
+                .reports
+                .iter_mut()
+                .find(|r| r.id == action_id)
+                .expect("just checked");
+            for index in (0..report.changes.len()).rev() {
+                if let Some(entry) = self.payloads.get(&(action_id, index)) {
+                    let attempts = &mut report.changes[index].attempts;
+                    let attempt_index = attempts.len();
+                    attempts.push(new_attempt(Operation::Undo, now));
+                    let cmd = self.tracker.submit_undo(entry.clone());
+                    self.pending
+                        .insert(command_id(&cmd), (action_id, index, attempt_index));
+                    commands.push(cmd);
+                }
+            }
+            update_status(report);
+        }
+        if !undone_any {
+            return Err("No confirmed changes available to undo in this session".into());
+        }
+        self.dirty = true;
+        Ok(commands)
     }
 
     pub fn submit(&mut self, entity: EntityRef, actions: Vec<ActionDraft>) -> Vec<BridgeCmd> {
@@ -261,6 +473,7 @@ impl ChangeHistory {
             self.reports.push(ActionReport {
                 id,
                 session_id: self.session,
+                pid: self.pid,
                 entity: entity.clone(),
                 label: action.label,
                 before: action.before,
@@ -273,6 +486,7 @@ impl ChangeHistory {
                 undo_unavailable_reason: None,
             });
         }
+        self.dirty = true;
         self.prune();
         commands
     }
@@ -316,6 +530,7 @@ impl ChangeHistory {
         }
         update_status(report);
         let action_finished = !self.pending.values().any(|&(a, _, _)| a == action_id);
+        self.dirty = true;
         self.prune();
         Some(HistoryCompletion {
             entry: completion.entry,
@@ -330,27 +545,8 @@ impl ChangeHistory {
         if let Some(reason) = self.undo_reason() {
             return Err(reason);
         }
-        let action_id = self.latest().expect("eligible action").id;
-        let report = self
-            .reports
-            .iter_mut()
-            .find(|r| r.id == action_id)
-            .expect("eligible report");
-        let now = SystemTime::now();
-        let mut commands = Vec::new();
-        for index in (0..report.changes.len()).rev() {
-            if let Some(entry) = self.payloads.get(&(action_id, index)) {
-                let attempts = &mut report.changes[index].attempts;
-                let attempt_index = attempts.len();
-                attempts.push(new_attempt(Operation::Undo, now));
-                let cmd = self.tracker.submit_undo(entry.clone());
-                self.pending
-                    .insert(command_id(&cmd), (action_id, index, attempt_index));
-                commands.push(cmd);
-            }
-        }
-        update_status(report);
-        Ok(commands)
+        let id = self.latest().expect("eligible action").id;
+        self.undo_actions(&[id])
     }
 
     fn eligible(&self, report: &ActionReport) -> bool {
@@ -411,6 +607,7 @@ impl ChangeHistory {
             report.undo_unavailable_reason = Some(format!("Session ended: {reason}"));
         }
         self.session = self.session.checked_add(1).expect("session ID exhausted");
+        self.dirty = true;
         self.prune();
     }
 
@@ -441,6 +638,15 @@ impl ChangeHistory {
             };
             self.reports.remove(index);
         }
+    }
+}
+
+fn stored_payload(entry: &UndoEntry) -> StoredPayload {
+    StoredPayload {
+        description: entry.description.clone(),
+        addr: entry.addr,
+        old_raw: entry.old_raw.clone(),
+        new_raw: entry.new_raw.clone(),
     }
 }
 
@@ -587,6 +793,84 @@ mod tests {
     }
     fn status(h: &ChangeHistory) -> ActionStatus {
         h.reports().last().unwrap().status
+    }
+
+    #[test]
+    fn undo_actions_reverts_several_actions_newest_first() {
+        let mut h = ChangeHistory::new();
+        let first = h.submit(entity(), vec![draft("one", 1)]);
+        let second = h.submit(entity(), vec![draft("two", 1)]);
+        for cmd in first.iter().chain(&second) {
+            finish(&mut h, cmd, true, None);
+        }
+        let ids: Vec<u64> = h.reports().iter().map(|r| r.id).collect();
+        assert_eq!(ids.len(), 2);
+        let undo = h.undo_actions(&ids).expect("both eligible");
+        // Newest action's write is queued first.
+        match &undo[0] {
+            BridgeCmd::WriteBytes { addr, .. } => assert_eq!(*addr, second_cmd_addr(&second[0])),
+            _ => panic!("write expected"),
+        }
+        assert_eq!(undo.len(), 2);
+        for cmd in &undo {
+            finish(&mut h, cmd, true, None);
+        }
+        assert!(h.reports().iter().all(|r| r.status == ActionStatus::Undone));
+        assert_eq!(h.undo_len(), 0);
+    }
+
+    fn second_cmd_addr(cmd: &BridgeCmd) -> u64 {
+        match cmd {
+            BridgeCmd::WriteBytes { addr, .. } => *addr,
+            _ => panic!("write expected"),
+        }
+    }
+
+    #[test]
+    fn history_persists_across_runs_and_revives_for_the_same_pid() {
+        let dir = std::env::temp_dir().join(format!("fm_history_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("history.json");
+        std::fs::remove_file(&path).ok();
+
+        // Run 1: one confirmed edit; the editor closes without undoing.
+        let action_id;
+        {
+            let mut h = ChangeHistory::new();
+            h.note_pid(4242);
+            let cmds = h.submit(entity(), vec![draft("facility", 1)]);
+            assert_eq!(cmds.len(), 1);
+            finish(&mut h, &cmds[0], true, None);
+            action_id = h.reports()[0].id;
+            assert_eq!(h.reports()[0].pid, 4242);
+            h.save_if_dirty(&path);
+            assert!(path.exists());
+        }
+
+        // Run 2: a fresh editor still sees the audit trail, view-only.
+        let mut revived = ChangeHistory::load(&path);
+        assert_eq!(revived.reports().len(), 1);
+        assert_eq!(revived.reports()[0].id, action_id);
+        assert!(!revived.undoable(action_id));
+        assert!(revived.undo_actions(&[action_id]).is_err());
+
+        // The same game reconnects: the undo payload revives (CAS-guarded).
+        revived.note_pid(4242);
+        revived.revive_session(4242);
+        assert!(revived.undoable(action_id));
+        let undo = revived.undo_actions(&[action_id]).unwrap();
+        for cmd in &undo {
+            finish(&mut revived, cmd, true, None);
+        }
+        assert_eq!(revived.reports()[0].status, ActionStatus::Undone);
+
+        // Run 3: a different game PID never revives payloads.
+        let mut other = ChangeHistory::load(&path);
+        other.note_pid(9999);
+        other.revive_session(9999);
+        assert_eq!(other.reports().len(), 1);
+        assert!(!other.undoable(action_id));
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]
@@ -862,6 +1146,7 @@ mod uncertainty_retention_tests {
         let mut report = ActionReport {
             id: 1,
             session_id: 1,
+            pid: 0,
             entity: EntityRef {
                 kind: EntityKind::Club,
                 build: GameBuild::Fm27Steam,

@@ -86,7 +86,7 @@ impl Storefront {
 /// A release as shipped by one storefront — the unit a schema is selected
 /// for. Only builds with a schema exist as variants, so a `GameBuild` always
 /// has one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GameBuild {
     Fm24Steam,
     Fm24Epic,

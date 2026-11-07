@@ -6,6 +6,7 @@ use eframe::egui::{self, Color32, RichText};
 use crate::edit_history::{
     ActionReport, ActionStatus, AttemptOutcome, EntityRef, Operation, SessionId,
 };
+use crate::i18n::UiTr;
 
 #[derive(Default)]
 pub struct HistoryUi {
@@ -20,9 +21,11 @@ pub struct HistoryUi {
     window_rect: Option<egui::Rect>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct HistoryUiContext<'a> {
     pub current_session: SessionId,
+    /// Actions that can be undone right now (live session, payload kept).
+    pub undoable_ids: std::collections::HashSet<crate::edit_history::ActionId>,
     pub current_entity: Option<&'a EntityRef>,
     pub undo_label: Option<&'a str>,
     pub undo_reason: Option<&'a str>,
@@ -32,6 +35,7 @@ pub struct HistoryUiContext<'a> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HistoryAction {
     UndoLatest,
+    UndoListed(Vec<crate::edit_history::ActionId>),
     OpenEntity(EntityRef),
 }
 
@@ -83,19 +87,23 @@ impl StatusFilter {
     }
 }
 
+fn ui_tr(ctx: &egui::Context, text: &str) -> String {
+    crate::i18n::tr(ctx, text)
+}
+
 impl HistoryUi {
     pub fn show(
         &mut self,
         ctx: &egui::Context,
         reports: &[ActionReport],
-        context: HistoryUiContext<'_>,
+        context: &HistoryUiContext<'_>,
     ) -> Option<HistoryAction> {
         #[cfg(test)]
         self.controls.clear();
         let mut open = self.open;
         let mut action = None;
         let available = ctx.screen_rect().size() - egui::vec2(24.0, 40.0);
-        let _window = egui::Window::new("History")
+        let _window = egui::Window::new(ui_tr(ctx, "History"))
             .id(egui::Id::new("edit_history_window"))
             .open(&mut open)
             .resizable(true)
@@ -126,50 +134,66 @@ impl HistoryUi {
                 .is_none()
                 .then_some("No confirmed changes are available to undo.")
         });
-        if self.button(ui, "Undo latest", undo_reason).clicked() {
-            action = Some(HistoryAction::UndoLatest);
-        }
-        if let Some(reason) = undo_reason {
-            wrapped(ui, reason);
-        } else if let Some(label) = context.undo_label {
-            short(ui, &format!("Next: {label}"));
-        }
-        ui.add_space(4.0);
-        ui.add(
-            egui::TextEdit::singleline(&mut self.search)
-                .hint_text("Search names, UID, fields, values or messages")
-                .desired_width(ui.available_width()),
-        );
-        ui.horizontal_wrapped(|ui| {
-            egui::ComboBox::from_id_salt("history_status")
-                .selected_text(self.status.label())
-                .show_ui(ui, |ui| {
-                    for filter in StatusFilter::ALL {
-                        ui.selectable_value(&mut self.status, filter, filter.label());
-                    }
-                });
-            ui.checkbox(&mut self.current_entity_only, "Current entity only");
-            ui.checkbox(
-                &mut self.include_closed_sessions,
-                "Include previous closed sessions",
-            );
-        });
-        ui.separator();
         let mut visible: Vec<_> = reports
             .iter()
             .filter(|report| self.matches(report, context))
             .collect();
         // IDs are submission order even if the wall clock is adjusted backwards.
         visible.sort_by_key(|report| std::cmp::Reverse(report.id));
+        if self.button(ui, "Undo latest", undo_reason).clicked() {
+            action = Some(HistoryAction::UndoLatest);
+        }
+        // Undo everything the current filter/search lists (newest first):
+        // e.g. search a player and revert all of their listed edits at once.
+        let listed_undoable: Vec<_> = visible
+            .iter()
+            .map(|report| report.id)
+            .filter(|id| context.undoable_ids.contains(id))
+            .collect();
+        let listed_reason = (!listed_undoable.is_empty())
+            .then_some(None)
+            .unwrap_or_else(|| Some("No listed action can be undone in this session."));
+        if self.button(ui, "Undo listed", listed_reason).clicked() {
+            action = Some(HistoryAction::UndoListed(listed_undoable));
+        }
+        if let Some(reason) = undo_reason {
+            wrapped(ui, reason);
+        } else if let Some(label) = context.undo_label {
+            short(ui, &format!("{} {label}", ui.tr("Next:")));
+        }
+        ui.add_space(4.0);
+        ui.add(
+            egui::TextEdit::singleline(&mut self.search)
+                .hint_text(ui.tr("Search names, UID, fields, values or messages"))
+                .desired_width(ui.available_width()),
+        );
+        ui.horizontal_wrapped(|ui| {
+            egui::ComboBox::from_id_salt("history_status")
+                .selected_text(ui.tr(self.status.label()))
+                .show_ui(ui, |ui| {
+                    for filter in StatusFilter::ALL {
+                        ui.selectable_value(&mut self.status, filter, &ui.tr(filter.label()));
+                    }
+                });
+            ui.checkbox(&mut self.current_entity_only, &ui.tr("Current entity only"));
+            ui.checkbox(
+                &mut self.include_closed_sessions,
+                &ui.tr("Include previous closed sessions"),
+            );
+        });
+        ui.separator();
         egui::ScrollArea::vertical()
             .id_salt("history_rows")
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.set_max_width(ui.available_width());
                 if reports.is_empty() {
-                    wrapped(ui, "No edit history yet. Submitted edits will appear here.");
+                    wrapped(
+                        ui,
+                        &ui.tr("No edit history yet. Submitted edits will appear here."),
+                    );
                 } else if visible.is_empty() {
-                    wrapped(ui, "No history matches these filters.");
+                    wrapped(ui, &ui.tr("No history matches these filters."));
                 }
                 for report in visible {
                     ui.push_id((report.session_id, report.id), |ui| {
@@ -250,10 +274,27 @@ impl HistoryUi {
         if self.button(ui, "Open profile", reason).clicked() {
             *action = Some(HistoryAction::OpenEntity(report.entity.clone()));
         }
+        // Per-action undo: reverts this one action through the acknowledged
+        // compare-and-swap path (memory must still hold the written bytes).
+        let undo_reason = if context.undoable_ids.contains(&report.id) {
+            context.undo_reason
+        } else {
+            Some(
+                report
+                    .session_closed
+                    .as_deref()
+                    .or(report.undo_unavailable_reason.as_deref())
+                    .or(context.undo_reason)
+                    .unwrap_or("Already undone or not eligible"),
+            )
+        };
+        if self.button(ui, "Undo", undo_reason).clicked() {
+            *action = Some(HistoryAction::UndoListed(vec![report.id]));
+        }
         if let Some(reason) = reason {
             short(ui, reason);
         }
-        egui::CollapsingHeader::new("Details")
+        egui::CollapsingHeader::new(ui.tr("Details"))
             .id_salt("details")
             .show(ui, |ui| details(ui, report));
     }
@@ -341,7 +382,7 @@ fn status_badge(ui: &mut egui::Ui, status: ActionStatus) {
             }
         }
     };
-    ui.add(egui::Label::new(RichText::new(status.label()).strong().color(color)).wrap());
+    ui.add(egui::Label::new(RichText::new(ui.tr(status.label())).strong().color(color)).wrap());
 }
 
 // One-line summaries are bounded; full source values remain available on hover.
@@ -355,8 +396,8 @@ fn wrapped(ui: &mut egui::Ui, text: &str) {
 }
 
 fn values(ui: &mut egui::Ui, before: &str, after: &str) {
-    short(ui, &format!("Before: {before}"));
-    short(ui, &format!("After: {after}"));
+    short(ui, &format!("{} {before}", ui.tr("Before:")));
+    short(ui, &format!("{} {after}", ui.tr("After:")));
 }
 
 fn details(ui: &mut egui::Ui, report: &ActionReport) {
@@ -487,6 +528,7 @@ mod tests {
         ActionReport {
             id: 1,
             session_id: 2,
+            pid: 0,
             entity: EntityRef {
                 kind: EntityKind::Player,
                 build: GameBuild::Fm27Steam,
@@ -524,6 +566,7 @@ mod tests {
     fn context() -> HistoryUiContext<'static> {
         HistoryUiContext {
             current_session: 2,
+            undoable_ids: [1u64].into_iter().collect(),
             current_entity: None,
             undo_label: Some("Example player: Current ability"),
             undo_reason: None,
@@ -642,7 +685,7 @@ mod tests {
                 events,
                 ..Default::default()
             },
-            |ctx| action = history.show(ctx, reports, context),
+            |ctx| action = history.show(ctx, reports, &context),
         );
         (action, output)
     }
@@ -655,9 +698,11 @@ mod tests {
         label: &str,
     ) -> Option<HistoryAction> {
         for _ in 0..3 {
-            assert!(frame(history, ctx, reports, context(), vec![], 400.0)
-                .0
-                .is_none());
+            assert!(
+                frame(history, ctx, reports, context(), vec![], 400.0)
+                    .0
+                    .is_none()
+            );
         }
         let rect = history
             .controls
@@ -675,9 +720,11 @@ mod tests {
                 modifiers: Default::default(),
             },
         ];
-        assert!(frame(history, ctx, reports, context(), down, 400.0)
-            .0
-            .is_none());
+        assert!(
+            frame(history, ctx, reports, context(), down, 400.0)
+                .0
+                .is_none()
+        );
         frame(
             history,
             ctx,
@@ -710,39 +757,45 @@ mod tests {
             click(&mut history, &ctx, &reports, context, "Open profile"),
             Some(HistoryAction::OpenEntity(reports[0].entity.clone()))
         );
-        assert!(click(
-            &mut history,
-            &ctx,
-            &reports,
-            || HistoryUiContext {
-                undo_reason: Some("Waiting for acknowledgement"),
-                ..context()
-            },
-            "Undo latest"
-        )
-        .is_none());
-        assert!(click(
-            &mut history,
-            &ctx,
-            &reports,
-            || HistoryUiContext {
-                undo_label: None,
-                ..context()
-            },
-            "Undo latest"
-        )
-        .is_none());
-        assert!(click(
-            &mut history,
-            &ctx,
-            &reports,
-            || HistoryUiContext {
-                navigation_enabled: false,
-                ..context()
-            },
-            "Open profile"
-        )
-        .is_none());
+        assert!(
+            click(
+                &mut history,
+                &ctx,
+                &reports,
+                || HistoryUiContext {
+                    undo_reason: Some("Waiting for acknowledgement"),
+                    ..context()
+                },
+                "Undo latest"
+            )
+            .is_none()
+        );
+        assert!(
+            click(
+                &mut history,
+                &ctx,
+                &reports,
+                || HistoryUiContext {
+                    undo_label: None,
+                    ..context()
+                },
+                "Undo latest"
+            )
+            .is_none()
+        );
+        assert!(
+            click(
+                &mut history,
+                &ctx,
+                &reports,
+                || HistoryUiContext {
+                    navigation_enabled: false,
+                    ..context()
+                },
+                "Open profile"
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -764,11 +817,13 @@ mod tests {
                 _ => report.session_id = 1,
             }
             assert!(click(&mut history, &ctx, &[report], context, "Open profile").is_none());
-            assert!(history
-                .controls
-                .iter()
-                .filter(|control| control.0 == "Open profile")
-                .all(|control| !control.2));
+            assert!(
+                history
+                    .controls
+                    .iter()
+                    .filter(|control| control.0 == "Open profile")
+                    .all(|control| !control.2)
+            );
         }
     }
 
@@ -874,16 +929,18 @@ mod tests {
                     ..Default::default()
                 };
                 for _ in 0..3 {
-                    assert!(frame(
-                        &mut history,
-                        &ctx,
-                        &[report.clone()],
-                        context(),
-                        vec![],
-                        width
-                    )
-                    .0
-                    .is_none());
+                    assert!(
+                        frame(
+                            &mut history,
+                            &ctx,
+                            &[report.clone()],
+                            context(),
+                            vec![],
+                            width
+                        )
+                        .0
+                        .is_none()
+                    );
                 }
                 let window = history.window_rect.unwrap();
                 assert!(
