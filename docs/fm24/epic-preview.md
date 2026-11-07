@@ -54,6 +54,17 @@ before writing, abort on drift, read-back after.
   5,100,645; the finance screen updated live to 5,948,520 € without leaving
   the page; restored and the screen reverted. No other finance figure moved.
 
+**Current in-game date mapped, 2026-11-08:** the packed DateDayYear pair for
+the user's on-screen date (21 June 2026, Sunday — day-of-year 172) was scanned
+for read-only across the fm.exe image. Exactly three stable copies exist;
+`module+0x642F458` sits inside the globals cluster just past the entity-array
+roots and is wired as `rva_current_date` for `FM24_EPIC`, so profile and
+search ages now use the live game date instead of the 2023 reference-year
+estimate (the user's career is ~3 seasons in: Hasan Yakub İlçin shows 17 in
+game, 14 with the old estimate). The other two copies (`0x631D5BC`,
+`0x6356C90`, in string/buffer regions) were not chosen. Re-verify this RVA
+after any Epic game update, alongside the fingerprint.
+
 **UI behaviour noted during the session:** FM's detailed player profile panel
 caches attribute values for the session — an edited attribute keeps showing
 the old number there until the panel is rebuilt. Squad-list attribute columns

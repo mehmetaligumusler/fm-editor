@@ -116,7 +116,13 @@ pub static FM24_EPIC: VersionedSchemas = VersionedSchemas {
     rva_clubs_data: 0x642EF58,
     rva_clubs_end: 0x642EF60,
     rva_stadium_base: 0,
-    rva_current_date: 0,
+    // Current in-game date, witnessed 2026-11-08 on the user's live career:
+    // the packed DateDayYear pair for 21 June 2026 (day 172, year 2026) held
+    // stably at module+0x642F458, inside the globals cluster just past the
+    // entity-array roots. Two other stable copies live in string/buffer
+    // regions (0x631D5BC, 0x6356C90) and were not chosen. Steam FM24 keeps
+    // 0 (unwitnessed on that build).
+    rva_current_date: 0x642F458,
 
     // Counts observed in the mapping save (used by scan_arrays.rs labels).
     fmrte_players: 75726,

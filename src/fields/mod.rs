@@ -801,6 +801,9 @@ mod schema_lookup_tests {
     #[test]
     fn current_date_rva_is_specific_to_the_verified_build() {
         assert_eq!(GameBuild::Fm27Steam.schemas().rva_current_date, 0x56AD378);
+        // Witnessed 2026-11-08 against the user's live Epic career (21 June
+        // 2026 held stably at module+0x642F458); Steam FM24 stays unmapped.
+        assert_eq!(GameBuild::Fm24Epic.schemas().rva_current_date, 0x642F458);
         for build in [
             GameBuild::Fm27GamePass,
             GameBuild::Fm24Steam,
