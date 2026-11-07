@@ -188,14 +188,29 @@ fn show_overview(
                                 ("Footedness", Category::Footedness),
                             ],
                         };
+                        // FM shows First Touch and Passing inside the
+                        // Goalkeeping block for goalkeepers (and drops them
+                        // from Technical); mirror that per player.
+                        let is_gk = player.field_u8("pos_gk").is_some_and(|v| v >= 15);
                         for &(heading, category) in categories {
+                            let (extras, skips): (&[&str], &[&str]) =
+                                if !is_gk || category != Category::Goalkeeping {
+                                    (&[], &[])
+                                } else {
+                                    (&["first_touch", "passing"], &[])
+                                };
+                            let skips: &[&str] = if is_gk && category == Category::Technical {
+                                &["first_touch", "passing"]
+                            } else {
+                                skips
+                            };
                             egui::Frame::group(col.style())
                                 .inner_margin(8.0)
                                 .show(col, |ui| {
                                     ui.set_width(ui.available_width());
                                     if let Some(raw) = projected.as_mut() {
                                         ui.add_enabled_ui(false, |ui| {
-                                            field_widget::category_column(
+                                            field_widget::category_column_ex(
                                                 schemas,
                                                 ui,
                                                 heading,
@@ -204,10 +219,12 @@ fn show_overview(
                                                 raw,
                                                 addr,
                                                 &mut Vec::new(),
+                                                extras,
+                                                skips,
                                             );
                                         });
                                     } else {
-                                        field_widget::category_column(
+                                        field_widget::category_column_ex(
                                             schemas,
                                             ui,
                                             heading,
@@ -216,6 +233,8 @@ fn show_overview(
                                             &mut player.raw,
                                             addr,
                                             edits,
+                                            extras,
+                                            skips,
                                         );
                                     }
                                 });

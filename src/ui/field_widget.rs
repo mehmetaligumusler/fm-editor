@@ -295,14 +295,61 @@ pub fn category_column(
     entity_addr: u64,
     edits: &mut Vec<FieldEdit>,
 ) {
+    category_column_ex(
+        schemas,
+        ui,
+        heading,
+        entity,
+        category,
+        raw,
+        entity_addr,
+        edits,
+        &[],
+        &[],
+    );
+}
+
+/// `category_column` plus per-player context: `extra_keys` are appended to the
+/// category's fields (FM shows First Touch and Passing inside the Goalkeeping
+/// block for goalkeepers) and `skip_keys` are removed from it (the same two
+/// leave the Technical block for goalkeepers). Everything re-sorts by the
+/// localized label, reproducing the game's on-screen order. An empty result
+/// renders nothing at all — no orphan heading (FM24's set-piece fields moved
+/// into Technical, leaving that category empty on this build).
+pub fn category_column_ex(
+    schemas: &'static crate::fields::VersionedSchemas,
+    ui: &mut egui::Ui,
+    heading: &str,
+    entity: Entity,
+    category: Category,
+    raw: &mut [u8],
+    entity_addr: u64,
+    edits: &mut Vec<FieldEdit>,
+    extra_keys: &[&str],
+    skip_keys: &[&str],
+) {
+    let ctx = ui.ctx().clone();
+    let mut fields: Vec<Field> = schemas
+        .fields_for_category(entity, category)
+        .into_iter()
+        .filter(|f| !skip_keys.iter().any(|k| *k == f.key))
+        .collect();
+    for key in extra_keys {
+        if let Some(f) = schemas.field(key).filter(|f| f.entity == entity) {
+            if !fields.iter().any(|e| e.key == f.key) {
+                fields.push(f.clone());
+            }
+        }
+    }
+    if fields.is_empty() {
+        return;
+    }
     ui.strong(ui.tr(heading));
     ui.add_space(6.0);
     // FM's own screens list attributes alphabetically by the localized name;
     // the schema order is discovery order. Sort per language so the editor
     // matches the game's on-screen order exactly (Turkish alphabetical under
     // Türkçe, English alphabetical under English).
-    let ctx = ui.ctx().clone();
-    let mut fields = schemas.fields_for_category(entity, category);
     fields.sort_by_cached_key(|f| crate::i18n::turkish_sort_key(&crate::i18n::tr(&ctx, f.label)));
     for f in &fields {
         if let Some(edit) = render_field(ui, f, raw, entity_addr) {
@@ -1705,6 +1752,71 @@ mod tests {
             },
         );
         (output, edits)
+    }
+
+    #[test]
+    fn goalkeeper_column_merges_first_touch_and_passing_in_game_order() {
+        let ctx = egui::Context::default();
+        crate::i18n::set_language(&ctx, crate::i18n::Language::Turkish);
+        let schemas = crate::game_version::GameBuild::Fm24Epic.schemas();
+        let mut raw = vec![0u8; schemas.player_struct_size];
+        let mut edits = Vec::new();
+        let output = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                category_column_ex(
+                    schemas,
+                    ui,
+                    "Goalkeeping",
+                    crate::fields::Entity::Player,
+                    crate::fields::Category::Goalkeeping,
+                    &mut raw,
+                    0,
+                    &mut edits,
+                    &["first_touch", "passing"],
+                    &[],
+                );
+            });
+        });
+        let mut labels: Vec<String> = text_shapes(&output.shapes)
+            .iter()
+            .map(|s| s.galley.text().to_owned())
+            .collect();
+        // Drop the numeric value boxes; keep attribute labels only.
+        labels.retain(|t| {
+            !t.trim().is_empty() && t.chars().next().is_some_and(|c| !c.is_ascii_digit())
+        });
+        let expected = [
+            "Ani Çıkış Eğilimi",
+            "Birebir",
+            "Bölge Hakimiyeti",
+            "Degaj",
+            "Eksantriklik",
+            "Elle Kontrol",
+            "Elle Oyun Başlatma",
+            "Hava Topları",
+            "İletişim",
+            "İlk Kontrol",
+            "Pas",
+            "Refleksler",
+            "Yumrukla Uzaklaştırma",
+        ];
+        for name in expected {
+            let pos = labels
+                .iter()
+                .position(|t| t.trim() == name)
+                .unwrap_or_else(|| panic!("missing {name} in {labels:?}"));
+            assert_eq!(
+                &labels.remove(pos),
+                &name.to_string(),
+                "order mismatch; remaining: {labels:?}"
+            );
+        }
+        assert!(
+            labels
+                .iter()
+                .all(|t| t.trim() == "1" || t.trim() == "Kalecilik"),
+            "only the heading and value boxes may remain: {labels:?}"
+        );
     }
 
     fn click_text(output: &egui::FullOutput, text: &str) -> Vec<egui::Event> {
