@@ -942,12 +942,12 @@ impl eframe::App for FmEditorApp {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button(ui.tr("File"), |ui| {
-                    if ui.button("Load Save").clicked() {
+                    if ui.button(ui.tr("Load Save")).clicked() {
                         reload_save_clicked = true;
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Quit").clicked() {
+                    if ui.button(ui.tr("Quit")).clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
@@ -985,7 +985,7 @@ impl eframe::App for FmEditorApp {
                             }
                         }
                     });
-                    ui.menu_button("Theme", |ui| {
+                    ui.menu_button(ui.tr("Theme"), |ui| {
                         for theme in [Theme::Dark, Theme::Light, Theme::DarkBlue] {
                             if ui
                                 .selectable_label(
@@ -1001,7 +1001,7 @@ impl eframe::App for FmEditorApp {
                             }
                         }
                     });
-                    ui.menu_button("Scale", |ui| {
+                    ui.menu_button(ui.tr("Scale"), |ui| {
                         let mut idx = self.settings.scale.to_index() as i32;
                         let labels = ["100%", "125%", "150%"];
                         ui.label(labels[idx as usize]);
@@ -1017,7 +1017,7 @@ impl eframe::App for FmEditorApp {
                             self.settings.save();
                         }
                     });
-                    ui.menu_button("Wage Display", |ui| {
+                    ui.menu_button(ui.tr("Wage Display"), |ui| {
                         for period in [WagePeriod::Weekly, WagePeriod::Monthly, WagePeriod::Yearly]
                         {
                             if ui
@@ -1035,14 +1035,14 @@ impl eframe::App for FmEditorApp {
                     });
                     ui.separator();
                     let mut rts = self.settings.reload_on_tab_switch;
-                    if ui.checkbox(&mut rts, "Reload on tab switch").changed() {
+                    if ui.checkbox(&mut rts, &ui.tr("Reload on tab switch")).changed() {
                         self.settings.reload_on_tab_switch = rts;
                         self.settings.save();
                     }
-                    ui.menu_button("Face Pack", |ui| {
+                    ui.menu_button(ui.tr("Face Pack"), |ui| {
                         let current = self.settings.face_pack_path.as_deref().unwrap_or("(none)");
-                        ui.label(current);
-                        if ui.button("Set path\u{2026}").clicked() {
+                        ui.label(ui.tr(current));
+                        if ui.button(ui.tr("Set path\u{2026}")).clicked() {
                             if let Some(path) = rfd::FileDialog::new().pick_folder() {
                                 self.settings.face_pack_path =
                                     Some(path.to_string_lossy().into_owned());
@@ -1050,7 +1050,7 @@ impl eframe::App for FmEditorApp {
                             }
                             ui.close_menu();
                         }
-                        if self.settings.face_pack_path.is_some() && ui.button("Clear").clicked() {
+                        if self.settings.face_pack_path.is_some() && ui.button(ui.tr("Clear")).clicked() {
                             self.settings.face_pack_path = None;
                             self.settings.save();
                             ui.close_menu();
