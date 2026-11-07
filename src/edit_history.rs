@@ -392,6 +392,29 @@ impl ChangeHistory {
         self.dirty = true;
     }
 
+    /// Remove actions from the audit trail entirely (their stored undo
+    /// payloads go with them). Never touches game memory. Pending actions
+    /// refuse deletion until their acknowledgements arrive.
+    pub fn delete_actions(&mut self, ids: &[ActionId]) -> Result<(), String> {
+        if self.is_pending() {
+            return Err("Waiting for write acknowledgements".into());
+        }
+        let pending_ids: Vec<ActionId> = ids
+            .iter()
+            .copied()
+            .filter(|id| self.pending.values().any(|&(a, _, _)| a == *id))
+            .collect();
+        if !pending_ids.is_empty() {
+            return Err("Waiting for write acknowledgements".into());
+        }
+        self.reports.retain(|r| !ids.contains(&r.id));
+        self.payloads.retain(|(id, _), _| !ids.contains(id));
+        self.revivable.retain(|(id, _), _| !ids.contains(id));
+        self.dirty = true;
+        self.prune();
+        Ok(())
+    }
+
     /// True when the action can be undone right now (same live session,
     /// not pending, undo payload retained).
     pub fn undoable(&self, id: ActionId) -> bool {
@@ -824,6 +847,33 @@ mod tests {
             BridgeCmd::WriteBytes { addr, .. } => *addr,
             _ => panic!("write expected"),
         }
+    }
+
+    #[test]
+    fn delete_actions_removes_audit_and_payloads_but_refuses_pending() {
+        let mut h = ChangeHistory::new();
+        let first = h.submit(entity(), vec![draft("one", 1)]);
+        let cmds = h.submit(entity(), vec![draft("two", 1)]);
+        for cmd in first.iter().chain(&cmds) {
+            finish(&mut h, cmd, true, None);
+        }
+        assert_eq!(h.reports().len(), 2);
+        let older = h.reports()[0].id;
+        let newer = h.reports()[1].id;
+
+        // Deleting the older action drops its report and undo payload only.
+        h.delete_actions(&[older]).unwrap();
+        assert_eq!(h.reports().len(), 1);
+        assert_eq!(h.reports()[0].id, newer);
+        assert!(h.undoable(newer));
+        assert!(!h.undoable(older));
+
+        // Pending writes refuse deletion.
+        let pending = h.submit(entity(), vec![draft("three", 1)]);
+        assert!(h.delete_actions(&[newer]).is_err());
+        finish(&mut h, &pending[0], true, None);
+        h.delete_actions(&[newer]).unwrap();
+        assert_eq!(h.reports().len(), 1);
     }
 
     #[test]

@@ -36,6 +36,7 @@ pub struct HistoryUiContext<'a> {
 pub enum HistoryAction {
     UndoLatest,
     UndoListed(Vec<crate::edit_history::ActionId>),
+    DeleteListed(Vec<crate::edit_history::ActionId>),
     OpenEntity(EntityRef),
 }
 
@@ -146,6 +147,17 @@ impl HistoryUi {
             .collect();
         // IDs are submission order even if the wall clock is adjusted backwards.
         visible.sort_by_key(|report| std::cmp::Reverse(report.id));
+        // Actions mid-write cannot be undone or deleted yet.
+        let pending_ids: Vec<crate::edit_history::ActionId> = visible
+            .iter()
+            .map(|report| report.id)
+            .filter(|id| {
+                matches!(
+                    report_status(reports, *id),
+                    Some(ActionStatus::Applying) | Some(ActionStatus::Undoing)
+                )
+            })
+            .collect();
         if self.button(ui, "Undo latest", undo_reason).clicked() {
             action = Some(HistoryAction::UndoLatest);
         }
@@ -161,6 +173,19 @@ impl HistoryUi {
             .unwrap_or_else(|| Some("No listed action can be undone in this session."));
         if self.button(ui, "Undo listed", listed_reason).clicked() {
             action = Some(HistoryAction::UndoListed(listed_undoable));
+        }
+        // Removing entries never touches game memory; it only drops the
+        // stored audit record (and its undo payload) from the list.
+        let deletable: Vec<_> = visible
+            .iter()
+            .map(|report| report.id)
+            .filter(|id| !pending_ids.contains(id))
+            .collect();
+        let delete_reason = (!deletable.is_empty())
+            .then_some(None)
+            .unwrap_or_else(|| Some("No listed action can be deleted right now."));
+        if self.button(ui, "Delete listed", delete_reason).clicked() {
+            action = Some(HistoryAction::DeleteListed(deletable));
         }
         if let Some(reason) = undo_reason {
             wrapped(ui, &ui.tr(reason));
@@ -297,6 +322,23 @@ impl HistoryUi {
         if self.button(ui, "Undo", undo_reason).clicked() {
             *action = Some(HistoryAction::UndoListed(vec![report.id]));
         }
+        let delete_reason = if matches!(
+            report.status,
+            ActionStatus::Applying | ActionStatus::Undoing
+        ) {
+            Some("Waiting for write acknowledgements")
+        } else {
+            None
+        };
+        if self
+            .button(ui, "Delete", delete_reason)
+            .on_hover_text(ui.tr(
+                "Removes this entry from the history list and its stored undo payload. Game memory is not touched.",
+            ))
+            .clicked()
+        {
+            *action = Some(HistoryAction::DeleteListed(vec![report.id]));
+        }
         if let Some(reason) = reason {
             short(ui, &ui.tr(reason));
         }
@@ -304,6 +346,13 @@ impl HistoryUi {
             .id_salt("details")
             .show(ui, |ui| details(ui, report));
     }
+}
+
+fn report_status(
+    reports: &[ActionReport],
+    id: crate::edit_history::ActionId,
+) -> Option<ActionStatus> {
+    reports.iter().find(|r| r.id == id).map(|r| r.status)
 }
 
 fn same_entity(left: &EntityRef, right: &EntityRef) -> bool {

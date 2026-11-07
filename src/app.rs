@@ -1699,6 +1699,7 @@ impl eframe::App for FmEditorApp {
             .filter(|id| self.change_history.undoable(*id))
             .collect();
         let mut undo_listed: Option<Vec<crate::edit_history::ActionId>> = None;
+        let mut delete_listed: Option<Vec<crate::edit_history::ActionId>> = None;
         let history_action = self.history_ui.show(
             ctx,
             self.change_history.reports(),
@@ -1716,6 +1717,9 @@ impl eframe::App for FmEditorApp {
             Some(crate::ui::edit_history::HistoryAction::UndoLatest) => undo_requested = true,
             Some(crate::ui::edit_history::HistoryAction::UndoListed(ids)) => {
                 undo_listed = Some(ids)
+            }
+            Some(crate::ui::edit_history::HistoryAction::DeleteListed(ids)) => {
+                delete_listed = Some(ids)
             }
             Some(crate::ui::edit_history::HistoryAction::OpenEntity(target)) => {
                 history_open_entity = Some(target)
@@ -1842,6 +1846,11 @@ impl eframe::App for FmEditorApp {
                     }
                     Err(reason) => self.write_error = Some(reason),
                 }
+            }
+        }
+        if let Some(ids) = delete_listed.take() {
+            if let Err(reason) = self.change_history.delete_actions(&ids) {
+                self.write_error = Some(reason);
             }
         }
         // The audit trail persists across editor restarts.

@@ -796,6 +796,16 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("History", "Geçmiş"),
         ("Undo latest", "En son eylemi geri al"),
         ("Undo listed", "Listelenenleri geri al"),
+        ("Delete", "Sil"),
+        ("Delete listed", "Listeden sil"),
+        (
+            "No listed action can be deleted right now.",
+            "Şu anda listeden silinebilecek aksiyon yok.",
+        ),
+        (
+            "Removes this entry from the history list and its stored undo payload. Game memory is not touched.",
+            "Bu kaydı geçmiş listesinden ve kayıtlı geri alma verisini siler. Oyun belleğine dokunulmaz.",
+        ),
         ("Next:", "Sıradaki:"),
         (
             "Search names, UID, fields, values or messages",
