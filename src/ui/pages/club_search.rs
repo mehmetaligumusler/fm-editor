@@ -76,7 +76,7 @@ pub fn filter_row(ui: &mut egui::Ui, state: &mut ClubSearchState) {
         ui.colored_label(ui.visuals().error_fg_color, error);
     }
     ui.horizontal_wrapped(|ui| {
-        ui.checkbox(&mut state.female, "Female")
+        ui.checkbox(&mut state.female, &ui.tr("Female"))
             .on_hover_text("Only female clubs; unchecked includes all clubs.");
         if ui.button(ui.tr("Reset all")).clicked() {
             state.reset();

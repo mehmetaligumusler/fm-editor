@@ -45,7 +45,7 @@ pub fn show(
     schemas: &'static VersionedSchemas,
     cache: Option<&Arc<EntityCache>>,
 ) -> Option<usize> {
-    ui.heading("Best XI");
+    ui.heading(ui.tr("Best XI"));
     let Some(cache) = cache else {
         state.clear();
         ui.label("Load a save to build a lineup.");
@@ -114,7 +114,7 @@ pub fn show(
             return None;
         }
     }
-    ui.weak("Cached squad snapshot").on_hover_text("Current club membership, including youth. Away loans excluded. Reload Save to refresh. Fitness, injuries, suspensions and registration eligibility are not checked.");
+    ui.weak(ui.tr("Cached squad snapshot")).on_hover_text("Current club membership, including youth. Away loans excluded. Reload Save to refresh. Fitness, injuries, suspensions and registration eligibility are not checked.");
     if state.lineup.is_none()
         || previous != (state.club, state.formation, state.growth, state.minimum)
     {
@@ -130,13 +130,15 @@ pub fn show(
     let lineup = state.lineup.as_ref()?;
     let filled = lineup.selected.iter().flatten().count();
     let mode = if state.growth {
-        "Growth headroom"
+        ui.tr("Growth headroom")
     } else {
-        "Current strength"
+        ui.tr("Current strength")
     };
     ui.strong(format!(
-        "{mode} · {filled}/11 positions filled · {} players in scope",
-        lineup.pool_size
+        "{mode} · {filled}/11 {} · {} {}",
+        ui.tr("positions filled"),
+        lineup.pool_size,
+        ui.tr("players in scope")
     )).on_hover_text("Each player is used once: maximize filled positions, then total score. Strength uses heuristic attribute weights × familiarity / 20, not FM match-engine ratings; foot and roles are not modeled. Growth uses PA − CA capacity, not a development rate.");
     let mut clicked = None;
     egui::ScrollArea::vertical()
@@ -145,14 +147,14 @@ pub fn show(
             if filled < 11 {
                 ui.colored_label(
                     ui.visuals().warn_fg_color,
-                    format!("Incomplete XI ({filled}/11)"),
+                    format!("{} ({filled}/11)", ui.tr("Incomplete XI")),
                 );
             }
             if ui.available_width() >= 620.0 {
                 pitch(ui, cache, lineup, state, &mut clicked);
             }
             ui.add_space(8.0);
-            ui.heading("Position depth").on_hover_text(
+            ui.heading(ui.tr("Position depth")).on_hover_text(
                 "Alternatives are ranked independently per slot and can appear in several lists.",
             );
             let columns = if ui.available_width() >= 1000.0 {
@@ -179,7 +181,7 @@ pub fn show(
                                     &mut clicked,
                                 );
                             } else {
-                                ui.label("No eligible player");
+                                ui.label(ui.tr("No eligible player"));
                             }
                             ui.separator();
                             let alternatives: Vec<_> = lineup.ranked[slot]
@@ -196,7 +198,7 @@ pub fn show(
                                 .take(3)
                                 .collect();
                             if alternatives.is_empty() {
-                                ui.weak("No eligible alternatives");
+                                ui.weak(ui.tr("No eligible alternatives"));
                             }
                             for (rank, c) in alternatives.iter().enumerate() {
                                 let elsewhere = lineup
@@ -204,10 +206,11 @@ pub fn show(
                                     .iter()
                                     .position(|s| s.is_some_and(|s| s.player == c.player));
                                 let label = elsewhere.map_or_else(
-                                    || format!("Cover {}", rank + 1),
+                                    || format!("{} {}", ui.tr("Cover"), rank + 1),
                                     |s| {
                                         format!(
-                                            "Starts at {}",
+                                            "{} {}",
+                                            ui.tr("Starts at"),
                                             FORMATIONS[state.formation].slots[s].label
                                         )
                                     },
@@ -247,15 +250,21 @@ fn player(
         *clicked = Some(c.player);
     }
     ui.label(format!(
-        "Fit {:.1} · attributes {:.1} · familiarity {}/20",
-        c.fit, c.rating, c.familiarity
+        "{} {:.1} · {} {:.1} · {} {}/20",
+        ui.tr("Fit"),
+        c.fit,
+        ui.tr("attributes"),
+        c.rating,
+        ui.tr("familiarity"),
+        c.familiarity
     ));
     let value = |key| best_xi::ability(schemas, p, key).map_or("?".into(), |v| v.to_string());
     let room = c.headroom.map_or("?".into(), |v| format!("+{v}"));
     ui.label(format!(
-        "CA {} · PA {} · room {room}",
+        "CA {} · PA {} · {} {room}",
         value("p_ca"),
-        value("p_pa")
+        value("p_pa"),
+        ui.tr("room")
     ));
     if growth {
         let trait_value =
@@ -304,7 +313,7 @@ fn pitch(
                     c.headroom
                         .map_or("? room".into(), |room| format!("+{room} room"))
                 } else {
-                    format!("{:.1} fit", c.fit)
+                    format!("{:.1} {}", c.fit, ui.tr("fit"))
                 }
             },
         );

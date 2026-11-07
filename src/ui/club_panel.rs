@@ -40,7 +40,7 @@ pub(crate) fn show(
         club.nation.as_deref(),
     );
     ui.horizontal(|ui| {
-        ui.label("Ground:");
+        ui.label(ui.tr("Ground:"));
         if let Some(name) = club
             .stadium_name
             .as_deref()
@@ -62,7 +62,7 @@ pub(crate) fn show(
         ui.selectable_value(tab, ClubTab::Overview, &ui.tr("Overview"));
         ui.selectable_value(tab, ClubTab::Facilities, &ui.tr("Facilities"));
         ui.selectable_value(tab, ClubTab::Finance, &ui.tr("Finance"));
-        ui.selectable_value(tab, ClubTab::Stadium, "Stadium (read-only)");
+        ui.selectable_value(tab, ClubTab::Stadium, &ui.tr("Stadium (read-only)"));
         if show_policy {
             ui.selectable_value(tab, ClubTab::ContractPolicy, "Contract policy (trial)");
         }
@@ -186,12 +186,12 @@ fn show_facilities(
         };
         let before = edits.len();
         if let Some((buf, base)) = club.sub_record_mut(container) {
-            u8_drag_1_20(ui, label, buf, offset, base, edits);
+            u8_drag_1_20(ui, &ui.tr(label), buf, offset, base, edits);
         }
         if edits.len() > before {
             let new_val = edits[edits.len() - 1].new_raw[0];
             if let Some(mut mirror) =
-                mirror_u8_edit(schemas, club, &format!("{key}_fin"), label, new_val)
+                mirror_u8_edit(schemas, club, &format!("{key}_fin"), &ui.tr(label), new_val)
             {
                 group_facility_edits(club.addr, key, &mut edits[before], &mut mirror);
                 edits.push(mirror);
@@ -201,7 +201,7 @@ fn show_facilities(
 
     if club.info_raw.is_some() {
         ui.add_space(8.0);
-        ui.strong("Supporter Profile");
+        ui.strong(ui.tr("Supporter Profile"));
         for (label, key) in [
             ("Hardcore %", "c_sup_hardcore"),
             ("Core %", "c_sup_core"),
@@ -218,7 +218,7 @@ fn show_facilities(
         }
 
         ui.add_space(8.0);
-        ui.strong("Supporter Attributes");
+        ui.strong(ui.tr("Supporter Attributes"));
         for (label, key) in [
             ("Loyalty", "c_sup_loyalty"),
             ("Passion", "c_sup_passion"),
@@ -269,7 +269,7 @@ fn show_finance(
         };
         let label = label.as_str();
         if let Some((buf, base)) = club.sub_record_mut(container) {
-            u32_drag(ui, label, buf, offset, base, edits);
+            u32_drag(ui, &ui.tr(label), buf, offset, base, edits);
             shown = true;
         }
     }
@@ -281,7 +281,7 @@ fn show_finance(
             continue;
         };
         if let Some((buf, base)) = club.sub_record_mut(container) {
-            f32_drag(ui, label, buf, offset, base, edits);
+            f32_drag(ui, &ui.tr(label), buf, offset, base, edits);
             shown = true;
         }
     }
@@ -306,7 +306,7 @@ fn show_finance(
         }
     }
     if !shown {
-        ui.label("Finance data not available.");
+        ui.label(ui.tr("Finance data not available."));
     }
 }
 
@@ -315,7 +315,7 @@ fn show_stadium(
     ui: &mut egui::Ui,
     club: &ClubView,
 ) {
-    ui.strong("Attendance");
+    ui.strong(ui.tr("Attendance"));
     if club.stadium_raw.is_some() {
         for key in ["c_avg_attendance", "c_min_attendance", "c_max_attendance"] {
             if let Some(f) = schemas.field(key) {
@@ -325,12 +325,12 @@ fn show_stadium(
             }
         }
     } else {
-        ui.label("Attendance sub-record not available.");
+        ui.label(ui.tr("Attendance sub-record not available."));
     }
 
     if let Some(se) = &club.stadium_entity_raw {
         ui.separator();
-        ui.strong("Stadium");
+        ui.strong(ui.tr("Stadium"));
         if let Some(name) = &club.stadium_name {
             field_widget::info_label(ui, "Name", name);
         }
