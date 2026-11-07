@@ -37,11 +37,4 @@ windows = { version = "0.61", features = [
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 
-# Attended Epic FM24 write/Undo verification only (docs/fm24/epic-preview.md).
-# The default build stays read-only for Fm24Epic at the UI, `write_bytes` and
-# OS-handle level; this feature unlocks Epic writes for the `epic_edit_test`
-# diagnostic against a designated test save. Never ship binaries with it on.
-[features]
-epic-write-test = []
-
 

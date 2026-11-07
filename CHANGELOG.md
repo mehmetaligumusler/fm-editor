@@ -4,7 +4,7 @@
 
 ### Features
 
-- FM24 Epic (Windows): **read-only preview** for the Epic Games Store build (product version `24.4.2+2081827`). Epic installs are recognised by their `.egstore`/`epic.txt` markers or the default install path, attach with an OS read-only handle (`VM_READ` only) and a pinned module fingerprint, and browse players, staff and clubs using the inherited Steam field offsets. Editing and Undo stay disabled at both the UI and `write_bytes` boundary until Epic field mappings are witnessed in game on a test save; see `docs/fm24/epic-preview.md`.
+- FM24 Epic (Windows): support for the Epic Games Store build (product version `24.4.2+2081827`). Epic installs are recognised by their `.egstore`/`epic.txt` markers or the default install path, with a pinned module fingerprint and a separate `Fm24Epic` schema. **Editing and Undo are enabled** after attended live verification on a designated test save (2026-11-07): a youth player's attribute and Antalyaspor's transfer budget were round-tripped and rendered correctly in game, then restored. Fields outside that verification remain Steam-inherited; the `epic_edit_test` diagnostic reproduces the procedure. See `docs/fm24/epic-preview.md`.
 
 ## 0.4.0 (prerelease)
 

@@ -2208,24 +2208,8 @@ fn editor_title(build: Option<GameBuild>, branch: Option<&str>) -> String {
 mod title_tests {
     use super::*;
 
-    #[cfg(not(feature = "epic-write-test"))]
     #[test]
-    fn connected_epic_preview_never_enables_editing_or_undo() {
-        let mut app = FmEditorApp::from_settings(AppSettings::default());
-        app.auto_connect = false;
-        app.conn = ConnState::Ready(123);
-        app.attached_build = Some(GameBuild::Fm24Epic);
-        assert!(!app.editing_allowed());
-        assert!(app.undo_unavailable_reason().unwrap().contains("read-only"));
-        app.attached_build = Some(GameBuild::Fm24Steam);
-        assert!(app.editing_allowed());
-        app.conn = ConnState::Disconnected;
-        assert!(!app.editing_allowed());
-    }
-
-    #[cfg(feature = "epic-write-test")]
-    #[test]
-    fn epic_write_test_feature_lifts_the_connected_epic_lock() {
+    fn connected_epic_enables_editing_after_live_verification() {
         let mut app = FmEditorApp::from_settings(AppSettings::default());
         app.auto_connect = false;
         app.conn = ConnState::Ready(123);
@@ -2235,6 +2219,10 @@ mod title_tests {
             app.undo_unavailable_reason(),
             Some("Epic preview is read-only; editing and Undo are disabled.".into())
         );
+        app.attached_build = Some(GameBuild::Fm24Steam);
+        assert!(app.editing_allowed());
+        app.conn = ConnState::Disconnected;
+        assert!(!app.editing_allowed());
     }
 
     #[test]

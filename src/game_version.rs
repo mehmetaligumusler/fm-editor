@@ -68,7 +68,7 @@ pub enum Storefront {
     Steam,
     /// PC Game Pass / Microsoft Store (Xbox app) install.
     GamePass,
-    /// Epic Games Store; currently a read-only FM24 research preview.
+    /// Epic Games Store; FM24 verified for editing on 2026-11-07.
     Epic,
 }
 
@@ -139,12 +139,13 @@ impl GameBuild {
         }
     }
 
-    /// Epic field layouts and edit/Undo have not been verified in-game.
-    /// Enforce this at both the UI and process boundary. The `epic-write-test`
-    /// cargo feature lifts the lock for the attended `epic_edit_test`
-    /// diagnostic on a designated test save (docs/fm24/epic-preview.md).
+    /// Every schema-backed build allows writes. FM24 Epic was unlocked after
+    /// attended live write/Undo witnesses on 2026-11-07 — player attribute
+    /// and club transfer budget round-trips rendered correctly in game
+    /// (docs/fm24/epic-preview.md). Untested Epic fields remain
+    /// Steam-inherited mappings.
     pub fn allows_writes(self) -> bool {
-        !matches!(self, GameBuild::Fm24Epic) || cfg!(feature = "epic-write-test")
+        true
     }
 
     /// The per-build schema bundle (field lists, RVAs, sizes).
@@ -176,7 +177,7 @@ impl GameBuild {
     pub fn display_name(self) -> &'static str {
         match self {
             GameBuild::Fm27GamePass => "FM27 Game Pass",
-            GameBuild::Fm24Epic => "FM24 Epic (read-only preview)",
+            GameBuild::Fm24Epic => "FM24 Epic",
             other => other.version().display_name(),
         }
     }
@@ -223,16 +224,10 @@ mod tests {
         assert_ne!(epic.schemas().known_dll_hash, 0);
     }
 
-    #[cfg(not(feature = "epic-write-test"))]
     #[test]
-    fn epic_is_read_only_by_default() {
-        assert!(!GameBuild::Fm24Epic.allows_writes());
-        assert!(GameBuild::Fm24Steam.allows_writes());
-    }
-
-    #[cfg(feature = "epic-write-test")]
-    #[test]
-    fn epic_write_test_feature_enables_epic_writes() {
-        assert!(GameBuild::Fm24Epic.allows_writes());
+    fn every_build_allows_writes_after_epic_verification() {
+        for build in GameBuild::ALL {
+            assert!(build.allows_writes(), "{build:?}");
+        }
     }
 }

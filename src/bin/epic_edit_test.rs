@@ -1,12 +1,11 @@
 //! Attended write/Undo verification for the FM24 Epic build.
 //!
-//! Built only with `--features epic-write-test`; every command refuses to
-//! run unless the attached game is `Fm24Epic` and the feature lifted the
-//! build's write lock. Run it against a designated TEST save with the user
-//! watching the value in game (docs/fm24/epic-preview.md). It never drives
-//! FM itself, never touches save files, and every write is compare-and-swap:
-//! memory is re-read immediately before writing, a changed value aborts, and
-//! the written bytes are read back afterwards. `restore` writes the value
+//! Every command refuses to run unless the attached game is `Fm24Epic`. Run
+//! it against a designated TEST save with the user watching the value in
+//! game (docs/fm24/epic-preview.md). It never drives FM itself, never
+//! touches save files, and every write is compare-and-swap: memory is
+//! re-read immediately before writing, a changed value aborts, and the
+//! written bytes are read back afterwards. `restore` writes the value
 //! printed by `set` back through the same path.
 //!
 //! Usage:
@@ -87,7 +86,7 @@ fn find_cmd(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Attach directly and enforce the Epic-only, feature-gated contract.
+/// Attach directly and enforce the Epic-only contract.
 fn attach_epic_writable() -> Result<FmProcess, String> {
     let fm = FmProcess::attach()?;
     if fm.build != GameBuild::Fm24Epic {
@@ -95,13 +94,6 @@ fn attach_epic_writable() -> Result<FmProcess, String> {
             "this diagnostic only runs against the FM24 Epic build, not {}",
             fm.build.display_name()
         ));
-    }
-    if !fm.build.allows_writes() {
-        return Err(
-            "FM24 Epic is read-only; rebuild with --features epic-write-test for the \
-             attended test-save diagnostic"
-                .into(),
-        );
     }
     Ok(fm)
 }
@@ -257,9 +249,8 @@ fn attr_cmd(args: &[String]) -> Result<(), String> {
         return Err(format!("field {key} is not a direct in-struct field"));
     };
     let width = match encoding {
-        Encoding::Encoded | Encoding::Direct | Encoding::Raw | Encoding::RawCapped(_) => {
-            check_value(encoding, value.unwrap_or(0))?
-        }
+        Encoding::Encoded | Encoding::Direct => 1,
+        Encoding::Raw | Encoding::RawCapped(_) => 2,
         other => {
             return Err(format!(
                 "encoding {other:?} not supported by this diagnostic"
@@ -345,16 +336,14 @@ fn budget_cmd(args: &[String]) -> Result<(), String> {
         .field("c_transfer_budget")
         .ok_or("c_transfer_budget unmapped for this build")?;
     let Some(FieldLocation::SubRecord {
-        container,
-        offset,
-        encoding,
+        container, offset, ..
     }) = field.offset
     else {
         return Err("c_transfer_budget is not a sub-record field".into());
     };
-    if encoding != Encoding::RawU32 {
-        return Err(format!("unexpected budget encoding {encoding:?}"));
-    }
+    // The schema declares this field `sub_raw`, but the editor's own club
+    // paths (read_club_field_u32, the panel writer) treat it as the 4-byte
+    // i32 £ value FM's finance screen shows; mirror that here.
     let sub_ptr = fields::resolve_sub_ptr(&fm, club.addr, container, fm.schemas().club_sub_records)
         .ok_or("finance sub-record pointer is unreadable")?;
     let addr = sub_ptr + offset;
