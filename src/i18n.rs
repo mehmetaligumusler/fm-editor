@@ -74,6 +74,62 @@ pub fn wage_suffix(period: crate::settings::WagePeriod, lang: Language) -> &'sta
     }
 }
 
+/// Sort key implementing the Turkish alphabet order FM's Turkish UI uses:
+/// a b c ç d e f g ğ h ı i j k l m n o ö p r s ş t u ü v y z.
+/// Rust's default byte ordering puts the non-ASCII Turkish letters after z
+/// (Çalışkanlık after Vizyon, Çeviklik last in the physical list); FM's own
+/// screens sort them right after their base letter. Spaces and punctuation
+/// are skipped so "Karar Alma" sorts before "Kararlılık".
+pub fn turkish_sort_key(s: &str) -> Vec<(u8, u32)> {
+    const ORDER: [(char, u8); 29] = [
+        ('a', 0),
+        ('b', 1),
+        ('c', 2),
+        ('ç', 3),
+        ('d', 4),
+        ('e', 5),
+        ('f', 6),
+        ('g', 7),
+        ('ğ', 8),
+        ('h', 9),
+        ('ı', 10),
+        ('i', 11),
+        ('j', 12),
+        ('k', 13),
+        ('l', 14),
+        ('m', 15),
+        ('n', 16),
+        ('o', 17),
+        ('ö', 18),
+        ('p', 19),
+        ('r', 20),
+        ('s', 21),
+        ('ş', 22),
+        ('t', 23),
+        ('u', 24),
+        ('ü', 25),
+        ('v', 26),
+        ('y', 27),
+        ('z', 28),
+    ];
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .map(|c| {
+            let lower = c.to_lowercase().next().unwrap_or(c);
+            if let Some((_, rank)) = ORDER.iter().find(|(l, _)| *l == lower) {
+                return (*rank, 0);
+            }
+            // ASCII and other letters: keep a stable alphabetical feel with
+            // unknown letters after the Turkish alphabet, digits after that.
+            if lower.is_ascii_digit() {
+                (40, lower as u32)
+            } else {
+                (30, lower as u32)
+            }
+        })
+        .collect()
+}
+
 static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let pairs: &[(&'static str, &'static str)] = &[
         // ── Navigation / app chrome ───────────────────────────────────────
@@ -219,6 +275,9 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("Acceleration", "Hızlanma"),
         ("Agility", "Çeviklik"),
         ("Balance", "Denge"),
+        ("Bank Balance", "Bakiye"),
+        ("Player", "Oyuncu"),
+        ("None", "Yok"),
         ("Jumping Reach", "Zıplama"),
         ("Natural Fitness", "Vücut Zindeliği"),
         ("Pace", "Hız"),
@@ -368,7 +427,7 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("Youth Coaching", "Altyapı Antrenmanı"),
         ("Youth Recruitment", "Altyapı Oyuncu Toplama"),
         ("Youth Improvement", "Altyapı Gelişimi"),
-        ("Balance", "Bakiye"),
+        ("Balance", "Denge"),
         ("Transfer Budget", "Transfer Bütçesi"), // witnessed 2026-11-07 (finance screen)
         ("Transfer Remaining", "Kalan Transfer Bütçesi"),
         ("Wage Budget", "Maaş Bütçesi"), // witnessed 2026-11-07 (finance screen)
@@ -483,7 +542,10 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("Looks For Pass Over Score", "Gol Yerine Pas Arar"),
         ("Plays No Through Balls", "Ara Pas Oynamaz"),
         ("Stops Play", "Oyunu Durdurur"),
-        ("Knocks Ball Past Opponent", "Topa Kayarak Hamle Yapmayı Sever"),
+        (
+            "Knocks Ball Past Opponent",
+            "Topa Kayarak Hamle Yapmayı Sever",
+        ),
         (
             "Shifts Ball To Right Before Dribble",
             "Dripling Öncesi Topu Sağa Kaydırır",
@@ -656,6 +718,67 @@ mod tests {
             }
         }
         assert!(missing.is_empty(), "no Turkish entry for: {missing:?}");
+    }
+
+    #[test]
+    fn turkish_sort_key_orders_letters_by_the_turkish_alphabet() {
+        let mut words = vec![
+            "Vizyon",
+            "Çalışkanlık",
+            "Cesaret",
+            "Zıplama",
+            "Çeviklik",
+            "Önsezi",
+        ];
+        words.sort_by_key(|w| turkish_sort_key(w));
+        assert_eq!(
+            words,
+            vec![
+                "Cesaret",
+                "Çalışkanlık",
+                "Çeviklik",
+                "Önsezi",
+                "Vizyon",
+                "Zıplama"
+            ]
+        );
+        // The merged FM24 technical list must render in the game's order.
+        let mut technical = [
+            "Uzun Taç",
+            "Bitiricilik",
+            "Serbest Vuruş Kullanma",
+            "Kafa Vuruşu",
+            "Korner",
+            "Markaj",
+            "Orta Yapma",
+            "Pas",
+            "Penaltı Kullanma",
+            "Teknik",
+            "Top Kapma",
+            "Uzaktan Şut",
+            "Dripling",
+            "İlk Kontrol",
+        ];
+        technical.sort_by_key(|w| turkish_sort_key(w));
+        assert_eq!(
+            technical,
+            [
+                "Bitiricilik",
+                "Dripling",
+                "İlk Kontrol",
+                "Kafa Vuruşu",
+                "Korner",
+                "Markaj",
+                "Orta Yapma",
+                "Pas",
+                "Penaltı Kullanma",
+                "Serbest Vuruş Kullanma",
+                "Teknik",
+                "Top Kapma",
+                "Uzaktan Şut",
+                "Uzun Taç",
+            ]
+        );
     }
 
     #[test]

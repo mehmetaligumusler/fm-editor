@@ -303,7 +303,7 @@ pub fn category_column(
     // Türkçe, English alphabetical under English).
     let ctx = ui.ctx().clone();
     let mut fields = schemas.fields_for_category(entity, category);
-    fields.sort_by_cached_key(|f| crate::i18n::tr(&ctx, f.label));
+    fields.sort_by_cached_key(|f| crate::i18n::turkish_sort_key(&crate::i18n::tr(&ctx, f.label)));
     for f in &fields {
         if let Some(edit) = render_field(ui, f, raw, entity_addr) {
             edits.push(edit);
@@ -967,7 +967,7 @@ fn date_edit_inner(
     let id = calendar_id(entity_addr, doy_offset);
     ui.push_id(id, |ui| {
         ui.horizontal_wrapped(|ui| {
-            ui.label(label);
+            ui.label(ui.tr(label));
             let day_changed = number_edit(
                 ui,
                 egui::DragValue::new(&mut day)
@@ -1078,12 +1078,12 @@ pub fn choice_u8_edit(
         profile_label(ui, label);
         ui.add_enabled_ui(enabled, |ui| {
             egui::ComboBox::from_id_salt(("choice_u8", label, base_addr, offset))
-                .selected_text(old_name)
+                .selected_text(ui.tr(old_name))
                 .width(ui.available_width().min(160.0).max(0.0))
                 .wrap_mode(egui::TextWrapMode::Truncate)
                 .show_ui(ui, |ui| {
                     for &(code, name) in options {
-                        ui.selectable_value(&mut new, code, name);
+                        ui.selectable_value(&mut new, code, &ui.tr(name));
                     }
                 });
         });
@@ -1100,8 +1100,17 @@ pub fn choice_u8_edit(
         addr: base_addr + offset as u64,
         old_raw: vec![old],
         new_raw: vec![new],
-        description: format!("{label}: {old_name} \u{2192} {new_name}"),
-        presentation: Some(EditPresentation::new(label, old_name, new_name)),
+        description: format!(
+            "{}: {} \u{2192} {}",
+            ui.tr(label),
+            ui.tr(old_name),
+            ui.tr(new_name)
+        ),
+        presentation: Some(EditPresentation::new(
+            ui.tr(label),
+            ui.tr(old_name),
+            ui.tr(new_name),
+        )),
     })
 }
 

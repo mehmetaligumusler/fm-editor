@@ -397,7 +397,7 @@ fn show_reputation(
     let p_world_rep = schemas.field("p_world_rep").unwrap();
     // Reputation
     ui.vertical(|ui| {
-        ui.strong("Reputation");
+        ui.strong(ui.tr("Reputation"));
         if let Some(e) =
             field_widget::raw_u16_edit(ui, &p_current_rep, &mut player.raw, 10000, addr)
         {
@@ -926,7 +926,7 @@ fn show_player_status(
             ui.label("Injury data unavailable (read-only).");
         }
         ListState::Items(items) if items.is_empty() => {
-            ui.label("None");
+            ui.label(ui.tr("None"));
         }
         ListState::Items(items) => {
             for injury in items {
@@ -963,7 +963,7 @@ fn show_player_status(
             ui.label("Unavailability data unavailable (read-only).");
         }
         ListState::Items(items) if items.is_empty() => {
-            ui.label("None");
+            ui.label(ui.tr("None"));
         }
         ListState::Items(items) => {
             for absence in items {
@@ -1272,7 +1272,7 @@ fn show_clauses(
             ui.label("Clause data unavailable (read-only).");
         }
         ListState::Items(items) if items.is_empty() => {
-            ui.label("None");
+            ui.label(ui.tr("None"));
         }
         ListState::Items(items) => {
             for clause in items {

@@ -517,7 +517,7 @@ pub fn results_grid(
                         ),
                     );
                 }
-                ui.add_sized([COL_ROLE, ROW_HEIGHT], egui::Label::new(role_text));
+                ui.add_sized([COL_ROLE, ROW_HEIGHT], egui::Label::new(ui.tr(&role_text)));
                 if show_club {
                     ui.add_sized(
                         [80.0, ROW_HEIGHT],
