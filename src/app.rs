@@ -1065,6 +1065,8 @@ impl eframe::App for FmEditorApp {
         let cache_arc = self.entity_cache.clone();
         navigation::publish_cache(ctx, cache_arc.clone());
         crate::i18n::set_language(ctx, self.settings.language);
+        crate::i18n::set_currency(ctx, self.settings.currency);
+        crate::i18n::set_wage_period(ctx, self.settings.wage_period);
         navigation::set_editing_enabled(
             ctx,
             self.editing_allowed() && !self.change_history.is_pending(),
