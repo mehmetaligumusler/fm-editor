@@ -4,6 +4,7 @@
 
 ### Features
 
+- **Türkçe arayüz desteği.** Settings → Language → Türkçe. Translations follow FM's own Turkish game localization — attribute names, morale words, finance/budget terms, staff roles — rather than generic translation (field labels witnessed against a Turkish FM24 Epic career on 2026-11-07). Covers navigation, search pages, panel tabs, section headings, every mapped schema field label, category names, status banners and wage suffixes; unmapped strings fall back to English, never broken text. Terms live in one table (`src/i18n.rs`) and are easy to correct against the game.
 - FM24 Epic (Windows): support for the Epic Games Store build (product version `24.4.2+2081827`). Epic installs are recognised by their `.egstore`/`epic.txt` markers or the default install path, with a pinned module fingerprint and a separate `Fm24Epic` schema. **Editing and Undo are enabled** after attended live verification on a designated test save (2026-11-07): a youth player's attribute and Antalyaspor's transfer budget were round-tripped and rendered correctly in game, then restored. Fields outside that verification remain Steam-inherited; the `epic_edit_test` diagnostic reproduces the procedure. See `docs/fm24/epic-preview.md`.
 
 ## 0.4.0 (prerelease)

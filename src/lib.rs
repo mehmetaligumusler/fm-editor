@@ -15,6 +15,7 @@ pub mod edit_history;
 pub mod fields;
 pub mod game_date;
 pub mod game_version;
+pub mod i18n;
 pub mod person;
 pub mod player;
 pub mod process;

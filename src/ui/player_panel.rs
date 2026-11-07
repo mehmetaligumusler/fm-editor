@@ -1,11 +1,12 @@
 //! Player detail panel with identity, attributes, positions, traits and contract data.
 
+use crate::i18n::UiTr;
 use eframe::egui;
 
 use crate::fields::{self, Category, Entity};
 use crate::player::{self, Absence, GameDate, Injury, ListState, PlayerRecord};
 use crate::ratings;
-use crate::settings::{format_wage, WagePeriod};
+use crate::settings::{WagePeriod, format_wage};
 use crate::ui::field_widget::{self, FieldEdit};
 
 #[derive(PartialEq)]
@@ -42,9 +43,13 @@ pub fn show(
     );
     // Sub-tab bar
     ui.horizontal(|ui| {
-        ui.selectable_value(tab, PlayerTab::Overview, "Overview");
-        ui.selectable_value(tab, PlayerTab::PositionsTraits, "Positions & Traits");
-        ui.selectable_value(tab, PlayerTab::Contract, "Contract");
+        ui.selectable_value(tab, PlayerTab::Overview, &ui.tr("Overview"));
+        ui.selectable_value(
+            tab,
+            PlayerTab::PositionsTraits,
+            &ui.tr("Positions & Traits"),
+        );
+        ui.selectable_value(tab, PlayerTab::Contract, &ui.tr("Contract"));
     });
     ui.separator();
 
@@ -257,7 +262,7 @@ fn show_personal_details(
 
     // Personal Details
     ui.vertical(|ui| {
-        ui.strong("Identity");
+        ui.strong(ui.tr("Identity"));
         edits.extend(field_widget::dob_edit(ui, &mut player.raw, &p_dob, addr));
         if let Some(f) = schemas.field("p_height") {
             edits.extend(field_widget::raw_u16_edit(
@@ -371,7 +376,11 @@ fn show_personal_details(
             .field_u32("p_weekly_wage")
             .or_else(|| player.field_u32("p_contract_wage"))
         {
-            field_widget::info_label(ui, "Wage", format_wage(wage, wage_period));
+            field_widget::info_label(
+                ui,
+                "Wage",
+                format_wage(wage, wage_period, crate::i18n::language(ui.ctx())),
+            );
         }
     });
 }
@@ -458,7 +467,7 @@ fn show_positions_traits(
                         .max_height(height)
                         .show(ui, |ui| {
                             let heading_height = if height >= 414.0 {
-                                ui.strong("Positions");
+                                ui.strong(ui.tr("Positions"));
                                 24.0
                             } else {
                                 0.0
@@ -493,7 +502,7 @@ fn show_positions_traits(
             .id_salt("player_positions_stacked")
             .max_height(height)
             .show(ui, |ui| {
-                ui.strong("Positions");
+                ui.strong(ui.tr("Positions"));
                 show_positions_formation_with_height(
                     schemas,
                     ui,
@@ -2719,8 +2728,10 @@ mod tests {
             if width >= 892.0 {
                 let identity = heading("Identity");
                 for attribute in [tech, mental, physical] {
-                    assert!((attribute.top() - identity.top()).abs() < 4.0,
-                        "attributes must start beside personal details: {attribute:?}, {identity:?}");
+                    assert!(
+                        (attribute.top() - identity.top()).abs() < 4.0,
+                        "attributes must start beside personal details: {attribute:?}, {identity:?}"
+                    );
                     assert!(attribute.left() > identity.right());
                 }
                 assert_eq!(tech.left(), set.left());
@@ -2990,12 +3001,15 @@ mod tests {
                             },
                         );
                         let text = painted_text(&output);
-                        assert!(text
-                            .iter()
-                            .any(|(s, _, _)| s == "Contract type: Unknown (read-only)"));
-                        assert!(!text
-                            .iter()
-                            .any(|(s, _, _)| s.contains("Apply Contract Type")));
+                        assert!(
+                            text.iter()
+                                .any(|(s, _, _)| s == "Contract type: Unknown (read-only)")
+                        );
+                        assert!(
+                            !text
+                                .iter()
+                                .any(|(s, _, _)| s.contains("Apply Contract Type"))
+                        );
                         assert!(matches!(tab, PlayerTab::Contract));
                         assert!(edits.is_empty());
                         assert_eq!(player.contract_raw, before);

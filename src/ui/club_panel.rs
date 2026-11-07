@@ -1,5 +1,6 @@
 //! Club detail panel: Overview, Facilities, Finance, Stadium tabs.
 
+use crate::i18n::UiTr;
 use eframe::egui;
 
 use crate::bridge::ClubView;
@@ -58,9 +59,9 @@ pub(crate) fn show(
     });
 
     ui.horizontal_wrapped(|ui| {
-        ui.selectable_value(tab, ClubTab::Overview, "Overview");
-        ui.selectable_value(tab, ClubTab::Facilities, "Facilities");
-        ui.selectable_value(tab, ClubTab::Finance, "Finance");
+        ui.selectable_value(tab, ClubTab::Overview, &ui.tr("Overview"));
+        ui.selectable_value(tab, ClubTab::Facilities, &ui.tr("Facilities"));
+        ui.selectable_value(tab, ClubTab::Finance, &ui.tr("Finance"));
         ui.selectable_value(tab, ClubTab::Stadium, "Stadium (read-only)");
         if show_policy {
             ui.selectable_value(tab, ClubTab::ContractPolicy, "Contract policy (trial)");
@@ -100,7 +101,7 @@ fn show_overview(
     club: &mut ClubView,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong("Identity");
+    ui.strong(ui.tr("Identity"));
     field_widget::info_label(ui, "Full Name", &club.full_name);
     field_widget::info_label(ui, "Short Name", &club.short_name);
     field_widget::info_label(ui, "UID", club.uid);
@@ -167,7 +168,7 @@ fn show_facilities(
     club: &mut ClubView,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong("Facilities");
+    ui.strong(ui.tr("Facilities"));
     // Facility rows edit whichever sub-record the schema puts them in. Rows
     // with a `<key>_fin` mirror (FM27 academy coaching / youth recruitment,
     // which FM's Facilities screen reads from the finance object) write the
@@ -243,7 +244,7 @@ fn show_finance(
     club: &mut ClubView,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong("Finance");
+    ui.strong(ui.tr("Finance"));
     // Each row edits the sub-record its schema location names (FM26 keeps the
     // budgets in a finance → budget sub-record, FM27 in the finance object).
     let mut shown = false;

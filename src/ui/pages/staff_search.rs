@@ -3,6 +3,7 @@
 //! Search is now cache-driven: `filter()` runs every frame against the
 //! in-memory `EntityCache` — no bridge round-trip needed.
 
+use crate::i18n::UiTr;
 use eframe::egui;
 
 use crate::cache::CachedStaff;
@@ -244,7 +245,7 @@ fn reset_filters(state: &mut StaffSearchState) {
 /// Filtering is live; only functional filters are shown.
 pub fn filter_row(ui: &mut egui::Ui, state: &mut StaffSearchState) {
     ui.horizontal_wrapped(|ui| {
-        ui.label("Name/UID:");
+        ui.label(ui.tr("Name/UID:"));
         ui.add_sized(
             [220.0, 20.0],
             egui::TextEdit::singleline(&mut state.query).hint_text("Name or exact UID"),
@@ -281,7 +282,7 @@ pub fn filter_row(ui: &mut egui::Ui, state: &mut StaffSearchState) {
                     }
                 });
         });
-        if ui.button("Reset all").clicked() {
+        if ui.button(ui.tr("Reset all")).clicked() {
             reset_filters(state);
         }
     });
@@ -339,7 +340,7 @@ pub fn results_grid(
         if ui
             .add_sized(
                 [COL_NAME, ROW_HEIGHT],
-                egui::Button::new(col_label(SortColumn::Name, "Name")).frame(false),
+                egui::Button::new(col_label(SortColumn::Name, &ui.tr("Name"))).frame(false),
             )
             .clicked()
         {
@@ -354,7 +355,7 @@ pub fn results_grid(
         if ui
             .add_sized(
                 [COL_ROLE, ROW_HEIGHT],
-                egui::Button::new(col_label(SortColumn::Role, "Role")).frame(false),
+                egui::Button::new(col_label(SortColumn::Role, &ui.tr("Role"))).frame(false),
             )
             .clicked()
         {
@@ -396,7 +397,7 @@ pub fn results_grid(
         if ui
             .add_sized(
                 [COL_AGE, ROW_HEIGHT],
-                egui::Button::new(col_label(SortColumn::Age, "Age")).frame(false),
+                egui::Button::new(col_label(SortColumn::Age, &ui.tr("Age"))).frame(false),
             )
             .clicked()
         {
@@ -418,7 +419,7 @@ pub fn results_grid(
     }
 
     if results.is_empty() {
-        ui.label("No results.");
+        ui.label(ui.tr("No results."));
         return clicked;
     }
 

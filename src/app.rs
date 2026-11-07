@@ -12,6 +12,7 @@ use crate::edit_history::{
     ActionDraft, ChangeDraft, ChangeHistory, EditPresentation, EntityKind, EntityRef,
 };
 use crate::game_version::GameBuild;
+use crate::i18n::UiTr;
 use crate::player::PlayerRecord;
 use crate::process::RunningGame;
 use crate::settings::{AppSettings, Scale, Theme, WagePeriod, theme_data_id};
@@ -952,10 +953,32 @@ impl eframe::App for FmEditorApp {
                 });
 
                 ui.menu_button("Settings", |ui| {
+                    ui.menu_button("Language", |ui| {
+                        for lang in [
+                            crate::i18n::Language::English,
+                            crate::i18n::Language::Turkish,
+                        ] {
+                            if ui
+                                .selectable_label(
+                                    self.settings.language == lang,
+                                    lang.label(),
+                                )
+                                .clicked()
+                            {
+                                self.settings.language = lang;
+                                crate::i18n::set_language(ctx, lang);
+                                self.settings.save();
+                                ui.close_menu();
+                            }
+                        }
+                    });
                     ui.menu_button("Theme", |ui| {
                         for theme in [Theme::Dark, Theme::Light, Theme::DarkBlue] {
                             if ui
-                                .selectable_label(self.settings.theme == theme, theme.label())
+                                .selectable_label(
+                                    self.settings.theme == theme,
+                                    ui.tr(theme.label()),
+                                )
                                 .clicked()
                             {
                                 self.settings.theme = theme;
@@ -987,7 +1010,7 @@ impl eframe::App for FmEditorApp {
                             if ui
                                 .selectable_label(
                                     self.settings.wage_period == period,
-                                    period.label(),
+                                    ui.tr(period.label()),
                                 )
                                 .clicked()
                             {
@@ -1028,6 +1051,7 @@ impl eframe::App for FmEditorApp {
         // without conflicting with the &mut self borrow the closures hold.
         let cache_arc = self.entity_cache.clone();
         navigation::publish_cache(ctx, cache_arc.clone());
+        crate::i18n::set_language(ctx, self.settings.language);
         navigation::set_editing_enabled(
             ctx,
             self.editing_allowed() && !self.change_history.is_pending(),
@@ -1133,7 +1157,7 @@ impl eframe::App for FmEditorApp {
 
                 ui.separator();
                 ui.add_space(8.0);
-                ui.label(egui::RichText::new("BROWSE").small().strong().weak());
+                ui.label(egui::RichText::new(ui.tr("BROWSE")).small().strong().weak());
                 for (page, label) in [
                     (Page::BestXi, "Best XI"),
                     (Page::PlayerSearch, "Players"),
@@ -1144,7 +1168,9 @@ impl eframe::App for FmEditorApp {
                     if ui
                         .add_sized(
                             [ui.available_width(), 30.0],
-                            egui::Button::new(label).selected(selected).frame(selected),
+                            egui::Button::new(ui.tr(label))
+                                .selected(selected)
+                                .frame(selected),
                         )
                         .clicked()
                     {
@@ -1153,12 +1179,12 @@ impl eframe::App for FmEditorApp {
                     }
                 }
                 ui.add_space(12.0);
-                ui.label(egui::RichText::new("MANAGEMENT").small().strong().weak());
+                ui.label(egui::RichText::new(ui.tr("MANAGEMENT")).small().strong().weak());
                 let selected = self.active_page == Page::HumanManager;
                 if ui
                     .add_sized(
                         [ui.available_width(), 30.0],
-                        egui::Button::new("Human Manager")
+                        egui::Button::new(ui.tr("Human Manager"))
                             .selected(selected)
                             .frame(selected),
                     )
@@ -1171,7 +1197,7 @@ impl eframe::App for FmEditorApp {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.label(
-                        egui::RichText::new("GAME CONNECTION")
+                        egui::RichText::new(ui.tr("GAME CONNECTION"))
                             .small()
                             .strong()
                             .weak(),
@@ -1183,30 +1209,30 @@ impl eframe::App for FmEditorApp {
                         ConnState::Ready(_) => {
                             ui.colored_label(
                                 egui::Color32::from_rgb(76, 175, 80),
-                                "\u{25CF} Connected",
+                                format!("\u{25CF} {}", ui.tr("Connected")),
                             );
                         }
                         ConnState::WaitingForSave(_) => {
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 193, 7),
-                                "\u{25CF} Waiting for save",
+                                format!("\u{25CF} {}", ui.tr("Waiting for save…")),
                             );
                         }
                         ConnState::ReadOnly(_) => {
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 152, 0),
-                                "\u{25CF} Game not running",
+                                format!("\u{25CF} {}", ui.tr("Game not running")),
                             );
-                            if ui.button("Reconnect").clicked() {
+                            if ui.button(ui.tr("Reconnect")).clicked() {
                                 attach_requested = true;
                             }
                         }
                         ConnState::Disconnected => {
                             ui.colored_label(
                                 egui::Color32::from_rgb(244, 67, 54),
-                                "\u{25CF} Disconnected",
+                                format!("\u{25CF} {}", ui.tr("Disconnected")),
                             );
-                            if ui.button("Load Game").clicked() {
+                            if ui.button(ui.tr("Load Game")).clicked() {
                                 attach_requested = true;
                             }
                         }
@@ -1216,20 +1242,23 @@ impl eframe::App for FmEditorApp {
                     if matches!(self.conn, ConnState::Disconnected | ConnState::ReadOnly(_))
                         && !self.game_choices.is_empty()
                     {
-                        ui.label("Attach:");
+                        ui.label(ui.tr("Attach:"));
                         for game in &self.game_choices {
                             if ui.button(game.to_string()).clicked() {
                                 attach_pid_requested = Some(game.pid);
                             }
                         }
                     }
-                    ui.checkbox(&mut self.auto_connect, "Auto-connect");
+                    ui.checkbox(&mut self.auto_connect, &ui.tr("Auto-connect"));
 
                     // Reload Save button — available when connected + cache ready
                     if matches!(self.conn, ConnState::Ready(_))
                         && self.cache_load_state == CacheLoadState::Ready
                     {
-                        if ui.button("\u{21BB} Reload Save").clicked() {
+                        if ui
+                            .button(format!("\u{21BB} {}", ui.tr("Reload Save")))
+                            .clicked()
+                        {
                             reload_save_clicked = true;
                         }
                     }
@@ -1341,12 +1370,12 @@ impl eframe::App for FmEditorApp {
                 {
                     ui.label("Epic preview — read-only. Field readings are experimental; editing is disabled.");
                 } else if self.editing_allowed() {
-                    ui.label("Editing live — changes apply immediately. Ctrl+Z to undo.");
+                    ui.label(ui.tr("Editing live — changes apply immediately. Ctrl+Z to undo."));
                 } else {
-                    ui.label("Read-only — editing is disabled until a game and save are connected.");
+                    ui.label(ui.tr("Read-only — editing is disabled until a game and save are connected."));
                 }
                 ui.separator();
-                let undo_label = format!("Undo ({})", self.change_history.undo_len());
+                let undo_label = format!("{} ({})", ui.tr("Undo"), self.change_history.undo_len());
                 let undo_reason = self.undo_unavailable_reason();
                 let undo_hint = undo_reason.clone().unwrap_or_else(|| {
                     format!("Undo latest: {}. Current bytes will be checked before writing.", self.change_history.undo_label().unwrap_or_default())
@@ -1355,7 +1384,7 @@ impl eframe::App for FmEditorApp {
                     .on_hover_text(&undo_hint).on_disabled_hover_text(&undo_hint).clicked() {
                     undo_requested = true;
                 }
-                if ui.button("Change history").clicked() {
+                if ui.button(ui.tr("Change history")).clicked() {
                     self.history_ui.open = !self.history_ui.open;
                 }
                 self.player_comparison.toolbar(ui);
@@ -1368,7 +1397,7 @@ impl eframe::App for FmEditorApp {
             }
             ui.separator();
             let Some(schemas) = schemas else {
-                ui.label("Waiting for fm.exe\u{2026}");
+                ui.label(ui.tr("Waiting for fm.exe…"));
                 return;
             };
             match self.active_page {

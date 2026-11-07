@@ -1,5 +1,6 @@
 //! Cache-driven club search with validated live filters and sortable results.
 
+use crate::i18n::UiTr;
 use std::cmp::Ordering;
 
 use eframe::egui;
@@ -67,7 +68,7 @@ pub fn filter<'a>(cache: &'a [CachedClub], state: &ClubSearchState) -> Vec<&'a C
 /// Render the Name/UID input first, then a wrapping toolbar of live filters.
 pub fn filter_row(ui: &mut egui::Ui, state: &mut ClubSearchState) {
     ui.horizontal_wrapped(|ui| {
-        ui.label("Name/UID:");
+        ui.label(ui.tr("Name/UID:"));
         ui.add(egui::TextEdit::singleline(&mut state.query).desired_width(220.0).hint_text("Name or exact UID"))
             .on_hover_text("Names match all words, case-insensitively, in any order. Numeric-only input matches an exact UID. All filters combine with AND.");
     });
@@ -77,7 +78,7 @@ pub fn filter_row(ui: &mut egui::Ui, state: &mut ClubSearchState) {
     ui.horizontal_wrapped(|ui| {
         ui.checkbox(&mut state.female, "Female")
             .on_hover_text("Only female clubs; unchecked includes all clubs.");
-        if ui.button("Reset all").clicked() {
+        if ui.button(ui.tr("Reset all")).clicked() {
             state.reset();
         }
     });
@@ -170,7 +171,7 @@ pub fn results_grid(ui: &mut egui::Ui, results: &[&CachedClub]) -> Option<usize>
     let mut opened = None;
     let mut moved = None;
     if results.is_empty() {
-        ui.label("No results.");
+        ui.label(ui.tr("No results."));
     } else if crate::ui::navigation::result_keyboard_enabled(ui) && !ui.ctx().wants_keyboard_input()
     {
         let selected = order

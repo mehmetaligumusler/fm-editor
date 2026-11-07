@@ -1,10 +1,11 @@
 //! Aligned profile field rows with colored numeric editors and attribute grids.
 
 use crate::edit_history::{EditGroup, EditPresentation};
+use crate::i18n::UiTr;
 use eframe::egui;
 
 use crate::fields::{Category, Encoding, Entity, Field};
-use crate::settings::{theme_data_id, Theme};
+use crate::settings::{Theme, theme_data_id};
 
 use super::navigation;
 
@@ -12,16 +13,15 @@ const VALUE_SIZE: [f32; 2] = [44.0, 22.0];
 
 /// A fixed label slot keeps profile values aligned without centering short labels.
 /// Truncated labels automatically show their full text on hover in egui.
-pub(crate) fn profile_label(
-    ui: &mut egui::Ui,
-    label: impl Into<egui::WidgetText>,
-) -> egui::Response {
+/// The label localises through the i18n table (FM's own game terms).
+pub(crate) fn profile_label(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let text = crate::i18n::tr(ui.ctx(), label);
     ui.allocate_ui_with_layout(
         egui::vec2(130.0, VALUE_SIZE[1]),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             ui.set_min_size(egui::vec2(130.0, VALUE_SIZE[1]));
-            ui.add(egui::Label::new(label).truncate())
+            ui.add(egui::Label::new(text).truncate())
         },
     )
     .inner
@@ -97,7 +97,7 @@ pub fn stub_checkbox(ui: &mut egui::Ui, label: &str, reason: &str) -> egui::Resp
 pub fn stub_field(ui: &mut egui::Ui, label: &str, reason: &str) {
     let grey = egui::Color32::from_rgb(110, 110, 110);
     let resp = ui.horizontal(|ui| {
-        profile_label(ui, egui::RichText::new(label).color(grey));
+        profile_label(ui, label);
         ui.add_sized(
             VALUE_SIZE,
             egui::Label::new(egui::RichText::new("—").color(grey)),
@@ -113,7 +113,7 @@ pub fn stub_field(ui: &mut egui::Ui, label: &str, reason: &str) {
 fn render_out_of_range_label(ui: &mut egui::Ui, label: &str, raw_text: String, width: f32) {
     let grey = egui::Color32::from_rgb(110, 110, 110);
     ui.horizontal(|ui| {
-        profile_label(ui, egui::RichText::new(label).color(grey));
+        profile_label(ui, label);
         ui.add_sized(
             [width.max(VALUE_SIZE[0]), VALUE_SIZE[1]],
             egui::Label::new(egui::RichText::new(raw_text).color(grey)),
@@ -175,12 +175,13 @@ pub fn attr_edit(
         if new_displayed != displayed {
             let new_raw_byte = loc.encode_u8(new_displayed);
             raw[offset] = new_raw_byte;
+            let label_tr = ui.tr(field.label);
             return Some(FieldEdit {
                 addr: entity_addr + offset as u64,
                 old_raw: vec![old_raw_byte],
                 new_raw: vec![new_raw_byte],
-                description: format!("{}: {} \u{2192} {}", field.label, displayed, new_displayed),
-                presentation: Some(EditPresentation::new(field.label, displayed, new_displayed)),
+                description: format!("{}: {} \u{2192} {}", label_tr, displayed, new_displayed),
+                presentation: Some(EditPresentation::new(label_tr, displayed, new_displayed)),
             });
         }
     }
@@ -230,7 +231,7 @@ fn attr_cell_compact_inner(
             ui.set_width(56.0);
             ui.vertical_centered(|ui| {
                 if labelled {
-                    ui.label(egui::RichText::new(field.label).color(grey));
+                    ui.label(egui::RichText::new(ui.tr(field.label)).color(grey));
                 }
                 ui.add_sized(
                     VALUE_SIZE,
@@ -249,7 +250,7 @@ fn attr_cell_compact_inner(
         ui.set_width(56.0);
         ui.vertical_centered(|ui| {
             if labelled {
-                ui.label(field.label);
+                ui.label(ui.tr(field.label));
             }
             ui.visuals_mut().override_text_color = Some(color);
             changed = number_edit(
@@ -268,12 +269,13 @@ fn attr_cell_compact_inner(
         if new_displayed != displayed {
             let new_raw_byte = loc.encode_u8(new_displayed);
             raw[offset] = new_raw_byte;
+            let label_tr = ui.tr(field.label);
             return Some(FieldEdit {
                 addr: entity_addr + offset as u64,
                 old_raw: vec![old_raw_byte],
                 new_raw: vec![new_raw_byte],
-                description: format!("{}: {} \u{2192} {}", field.label, displayed, new_displayed),
-                presentation: Some(EditPresentation::new(field.label, displayed, new_displayed)),
+                description: format!("{}: {} \u{2192} {}", label_tr, displayed, new_displayed),
+                presentation: Some(EditPresentation::new(label_tr, displayed, new_displayed)),
             });
         }
     }
@@ -293,7 +295,7 @@ pub fn category_column(
     entity_addr: u64,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong(heading);
+    ui.strong(ui.tr(heading));
     ui.add_space(6.0);
     let fields = schemas.fields_for_category(entity, category);
     for f in &fields {
@@ -317,7 +319,7 @@ pub fn roles_column(
     roles: &[u8; 15],
     skip_zeros: bool,
 ) {
-    ui.strong(heading);
+    ui.strong(ui.tr(heading));
     ui.add_space(6.0);
     let role_fields = schemas.fields_for_category(Entity::Staff, Category::StaffRole);
     egui::Grid::new(heading)
@@ -404,12 +406,13 @@ pub fn raw_u8_edit(
         let new_val = val.clamp(0, max as i32) as u8;
         if new_val != old {
             raw[offset] = new_val;
+            let label_tr = ui.tr(label);
             return Some(FieldEdit {
                 addr: entity_addr + offset as u64,
                 old_raw: vec![old],
                 new_raw: vec![new_val],
-                description: format!("{}: {} \u{2192} {}", label, old, new_val),
-                presentation: Some(EditPresentation::new(label, old, new_val)),
+                description: format!("{}: {} \u{2192} {}", label_tr, old, new_val),
+                presentation: Some(EditPresentation::new(label_tr, old, new_val)),
             });
         }
     }
@@ -459,12 +462,13 @@ pub fn raw_u16_edit(
             let new_bytes = new_val.to_le_bytes();
             raw[offset] = new_bytes[0];
             raw[offset + 1] = new_bytes[1];
+            let label_tr = ui.tr(label);
             return Some(FieldEdit {
                 addr: entity_addr + offset as u64,
                 old_raw: old_bytes.to_vec(),
                 new_raw: new_bytes.to_vec(),
-                description: format!("{}: {} \u{2192} {}", label, old_val, new_val),
-                presentation: Some(EditPresentation::new(label, old_val, new_val)),
+                description: format!("{}: {} \u{2192} {}", label_tr, old_val, new_val),
+                presentation: Some(EditPresentation::new(label_tr, old_val, new_val)),
             });
         }
     }
@@ -511,13 +515,14 @@ pub fn raw_u32_edit(
         if new_val != old_val {
             let new_bytes = new_val.to_le_bytes();
             raw[offset..offset + 4].copy_from_slice(&new_bytes);
+            let label_tr = ui.tr(label);
             return Some(FieldEdit {
                 addr: entity_addr + offset as u64,
                 old_raw: old_bytes.to_vec(),
                 new_raw: new_bytes.to_vec(),
-                description: format!("{}: {} \u{2192} {}", label, old_val, new_val),
+                description: format!("{}: {} \u{2192} {}", label_tr, old_val, new_val),
                 presentation: Some(EditPresentation::new(
-                    label,
+                    label_tr,
                     money_value(label, old_val),
                     money_value(label, new_val),
                 )),
@@ -1359,15 +1364,17 @@ mod tests {
         let output = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let response = ui.allocate_ui(egui::vec2(250.0, 0.0), |ui| {
-                    assert!(choice_u8_edit(
-                        ui,
-                        "Ethnicity",
-                        &mut raw,
-                        &f,
-                        0x20000,
-                        &[(1, "Mediterranean/Hispanic")]
-                    )
-                    .is_none());
+                    assert!(
+                        choice_u8_edit(
+                            ui,
+                            "Ethnicity",
+                            &mut raw,
+                            &f,
+                            0x20000,
+                            &[(1, "Mediterranean/Hispanic")]
+                        )
+                        .is_none()
+                    );
                 });
                 assert!(
                     response.response.rect.width() <= 250.5,
@@ -1719,9 +1726,11 @@ mod tests {
         let (output, _) = date_frame(&ctx, &mut raw, 100, true, vec![]);
         date_frame(&ctx, &mut raw, 100, true, click_text(&output, "Calendar"));
         let (output, _) = date_frame(&ctx, &mut raw, 100, true, vec![]);
-        assert!(text_shapes(&output.shapes)
-            .iter()
-            .any(|s| s.galley.text() == "[1]"));
+        assert!(
+            text_shapes(&output.shapes)
+                .iter()
+                .any(|s| s.galley.text() == "[1]")
+        );
         let (_, edits) = date_frame(&ctx, &mut raw, 100, true, click_text(&output, "2"));
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].addr, 100);
@@ -1754,9 +1763,10 @@ mod tests {
             let (_, edits) = date_frame(&ctx, &mut raw, 200, ancestor, vec![]);
             assert!(edits.is_empty());
             assert_eq!(raw, original);
-            assert!(ctx
-                .data_mut(|d| d.get_temp::<CalendarDraft>(calendar_id(200, 0)))
-                .is_none());
+            assert!(
+                ctx.data_mut(|d| d.get_temp::<CalendarDraft>(calendar_id(200, 0)))
+                    .is_none()
+            );
             let (_, edits) = date_frame(&ctx, &mut raw, 100, ancestor, vec![]);
             assert!(edits.is_empty());
             if !editing || !ancestor {
@@ -1773,9 +1783,11 @@ mod tests {
             let (output, edits) = date_frame(&ctx, &mut raw, 100, true, vec![]);
             assert!(edits.is_empty());
             assert_eq!(raw, original);
-            assert!(!text_shapes(&output.shapes)
-                .iter()
-                .any(|s| s.galley.text() == "Calendar"));
+            assert!(
+                !text_shapes(&output.shapes)
+                    .iter()
+                    .any(|s| s.galley.text() == "Calendar")
+            );
         }
     }
 
@@ -2138,14 +2150,10 @@ mod tests {
                         assert!(
                             raw_u32_edit(ui, &field(Encoding::RawU32, 0), &mut raw, 0).is_none()
                         );
-                        assert!(ca_pa_edit(
-                            ui,
-                            &mut raw,
-                            &attribute,
-                            &field(Encoding::Direct, 1),
-                            0
-                        )
-                        .is_empty());
+                        assert!(
+                            ca_pa_edit(ui, &mut raw, &attribute, &field(Encoding::Direct, 1), 0)
+                                .is_empty()
+                        );
                         assert!(
                             dob_edit(ui, &mut dob, &field(Encoding::DateDayYear, 0), 0).is_empty()
                         );
