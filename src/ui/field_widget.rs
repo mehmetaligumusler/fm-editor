@@ -506,6 +506,19 @@ pub fn raw_u32_edit(
     let cur = crate::i18n::currency(ui.ctx());
     let money = is_money_label(label);
     let factor = if money { cur.factor() } else { 1.0 };
+    let suffix = if money {
+        let period = if is_wage_label(label) {
+            crate::i18n::wage_suffix(
+                crate::i18n::wage_period(ui.ctx()),
+                crate::i18n::language(ui.ctx()),
+            )
+        } else {
+            ""
+        };
+        format!(" {}{}", cur.symbol(), period)
+    } else {
+        String::new()
+    };
 
     ui.horizontal(|ui| {
         profile_label(ui, label);
@@ -515,7 +528,7 @@ pub fn raw_u32_edit(
             .speed(100.0);
         if money {
             drag = drag
-                .custom_formatter(crate::i18n::money_drag_formatter(factor, cur.symbol()))
+                .custom_formatter(crate::i18n::money_drag_formatter(factor, &suffix))
                 .custom_parser(crate::i18n::money_drag_parser(factor));
         }
         changed = number_edit(ui, drag, 90.0);
@@ -1283,6 +1296,12 @@ pub(super) fn is_money_label(label: &str) -> bool {
         || l.contains("ticket")
         || l.contains("price")
         || l.contains("value")
+}
+
+/// Labels whose values are per-week wages: their drags also show the
+/// selected wage period suffix (/hafta, /ay, /yıl).
+pub(super) fn is_wage_label(label: &str) -> bool {
+    label.to_ascii_lowercase().contains("wage")
 }
 
 /// Memory money values are GBP, irrespective of the display currency/period.

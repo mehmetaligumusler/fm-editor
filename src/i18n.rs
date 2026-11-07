@@ -71,12 +71,12 @@ pub fn format_money(gbp: u64, cur: crate::settings::Currency) -> String {
 /// DragValue display formatter for money drags: internal GBP → display value.
 pub fn money_drag_formatter(
     factor: f64,
-    symbol: &str,
+    suffix: &str,
 ) -> impl Fn(f64, std::ops::RangeInclusive<usize>) -> String + 'static {
-    let symbol = symbol.to_owned();
+    let suffix = suffix.to_owned();
     move |v, _| {
         let shown = ((v * factor).round() as i64).max(0) as u64;
-        format!("{} {}", thousands(shown), symbol)
+        format!("{}{}", thousands(shown), suffix)
     }
 }
 
@@ -539,7 +539,6 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("U21 Caps / Goals", "U21 Maç / Gol"),
         ("DOB", "Doğum"),
         ("Expiry", "Bitiş"),
-        ("Wage (GBP/week)", "Maaş (£/hafta)"),
         ("Hidden", "Gizli"),
         ("Calendar", "Takvim"),
         (
@@ -902,7 +901,7 @@ mod tests {
 
     #[test]
     fn money_drag_round_trips_through_the_currency_factor() {
-        let fmt = money_drag_formatter(1.166_228_8, "€");
+        let fmt = money_drag_formatter(1.166_228_8, " €");
         let parse = money_drag_parser(1.166_228_8);
         let shown = fmt(4_100_645.0, 0..=usize::MAX);
         assert_eq!(shown, "4,782,290 €");

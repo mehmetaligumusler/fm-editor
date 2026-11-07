@@ -782,7 +782,7 @@ fn show_contract(
     // address. Asking price is in the player struct itself.
     if let (Some(cr), Some(caddr)) = (player.contract_raw.as_mut(), player.contract_addr) {
         if let Some(mut f) = schemas.field("p_contract_wage").cloned() {
-            f.label = "Wage (GBP/week)";
+            f.label = "Wage";
             edits.extend(field_widget::raw_u32_edit(ui, &f, cr, caddr));
         }
         if let Some(f) = schemas.field("p_contract_expiry") {
