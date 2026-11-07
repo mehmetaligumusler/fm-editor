@@ -721,6 +721,77 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("weekly", "haftalık"),
         ("monthly", "aylık"),
         ("yearly", "yıllık"),
+        // ── Change history window (continued) ─────────────────────────────
+        ("Active", "Aktif"),
+        ("Human manager", "Menajer"),
+        (
+            "Already undone or not eligible",
+            "Zaten geri alınmış veya uygun değil",
+        ),
+        (
+            "No listed action can be undone in this session.",
+            "Bu oturumda listede geri alınabilir aksiyon yok.",
+        ),
+        (
+            "Waiting for write acknowledgements",
+            "Yazma onayları bekleniyor",
+        ),
+        (
+            "No confirmed changes available to undo in this session",
+            "Bu oturumda geri alınabilecek onaylanmış değişiklik yok",
+        ),
+        (
+            "Undo retention limit reached",
+            "Geri alma saklama sınırına ulaşıldı",
+        ),
+        (
+            "No confirmed changes are available to undo.",
+            "Geri alınabilecek onaylanmış değişiklik yok.",
+        ),
+        (
+            "Session closed: this record is audit-only; profiles cannot be opened.",
+            "Oturum kapandı: bu kayıt yalnızca denetim amaçlıdır; profiller açılamaz.",
+        ),
+        (
+            "Profile navigation is unavailable while disconnected or loading.",
+            "Bağlantı kesikken veya yüklenirken profil gezinme kullanılamaz.",
+        ),
+        (
+            "A valid entity UID and address are required to open a profile.",
+            "Profil açmak için geçerli bir UID ve adres gerekir.",
+        ),
+        (
+            "Acknowledgements describe reported outcomes, not an atomic transaction. Unconfirmed or interrupted writes may have changed memory; inspect the game before further edits.",
+            "Onaylar bildirilen sonuçları tanımlar, atomik bir işlemi değil. Onaysız veya kesilen yazmalar belleği değiştirmiş olabilir; yeni düzenlemelerden önce oyunu kontrol et.",
+        ),
+        ("Session closed:", "Oturum kapandı:"),
+        (
+            "This record has no write or navigation authority.",
+            "Bu kaydın yazma veya gezinme yetkisi yoktur.",
+        ),
+        ("Undo unavailable:", "Geri alma kullanılamıyor:"),
+        ("Physical change", "Fiziksel değişiklik"),
+        ("Apply", "Uygula"),
+        ("Pending acknowledgement", "Onay bekliyor"),
+        ("Confirmed", "Onaylandı"),
+        ("Refused before write", "Yazılmadan reddedildi"),
+        (
+            "Unconfirmed — outcome unknown",
+            "Onaysız — sonuç bilinmiyor",
+        ),
+        (
+            "Interrupted — outcome unknown",
+            "Kesildi — sonuç bilinmiyor",
+        ),
+        ("Completed:", "Tamamlandı:"),
+        ("Acknowledgement message / warning:", "Onay mesajı / uyarı:"),
+        (
+            "Technical information (read-only)",
+            "Teknik bilgiler (salt okunur)",
+        ),
+        ("Address:", "Adres:"),
+        ("Raw before:", "Ham önce:"),
+        ("Raw after:", "Ham sonra:"),
         // ── Change history window ─────────────────────────────────────────
         ("History", "Geçmiş"),
         ("Undo latest", "En son eylemi geri al"),

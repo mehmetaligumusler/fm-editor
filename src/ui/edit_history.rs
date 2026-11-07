@@ -41,7 +41,10 @@ pub enum HistoryAction {
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum StatusFilter {
+    /// Everything except fully undone actions — the default view, so
+    /// reverted edits disappear from the working list.
     #[default]
+    Active,
     All,
     Pending,
     Applied,
@@ -50,7 +53,8 @@ enum StatusFilter {
 }
 
 impl StatusFilter {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
+        Self::Active,
         Self::All,
         Self::Pending,
         Self::Applied,
@@ -60,6 +64,7 @@ impl StatusFilter {
 
     fn label(self) -> &'static str {
         match self {
+            Self::Active => "Active",
             Self::All => "All",
             Self::Pending => "Pending",
             Self::Applied => "Applied",
@@ -70,6 +75,7 @@ impl StatusFilter {
 
     fn matches(self, status: ActionStatus) -> bool {
         match self {
+            Self::Active => status != ActionStatus::Undone,
             Self::All => true,
             Self::Pending => matches!(status, ActionStatus::Applying | ActionStatus::Undoing),
             Self::Applied => status == ActionStatus::Applied,
@@ -157,7 +163,7 @@ impl HistoryUi {
             action = Some(HistoryAction::UndoListed(listed_undoable));
         }
         if let Some(reason) = undo_reason {
-            wrapped(ui, reason);
+            wrapped(ui, &ui.tr(reason));
         } else if let Some(label) = context.undo_label {
             short(ui, &format!("{} {label}", ui.tr("Next:")));
         }
@@ -224,12 +230,12 @@ impl HistoryUi {
         label: &'static str,
         disabled_reason: Option<&str>,
     ) -> egui::Response {
-        let response = ui.add_enabled(disabled_reason.is_none(), egui::Button::new(label));
+        let response = ui.add_enabled(disabled_reason.is_none(), egui::Button::new(ui.tr(label)));
         #[cfg(test)]
         self.controls
             .push((label, response.rect, response.enabled()));
         if let Some(reason) = disabled_reason {
-            response.on_disabled_hover_text(reason)
+            response.on_disabled_hover_text(ui.tr(reason))
         } else {
             response
         }
@@ -245,7 +251,7 @@ impl HistoryUi {
         let narrow = ui.available_width() <= 650.0;
         let identity = format!(
             "{} · UID {}",
-            report.entity.kind.label(),
+            ui.tr(report.entity.kind.label()),
             report
                 .entity
                 .uid
@@ -292,7 +298,7 @@ impl HistoryUi {
             *action = Some(HistoryAction::UndoListed(vec![report.id]));
         }
         if let Some(reason) = reason {
-            short(ui, reason);
+            short(ui, &ui.tr(reason));
         }
         egui::CollapsingHeader::new(ui.tr("Details"))
             .id_salt("details")
@@ -403,35 +409,46 @@ fn values(ui: &mut egui::Ui, before: &str, after: &str) {
 fn details(ui: &mut egui::Ui, report: &ActionReport) {
     wrapped(
         ui,
-        "Acknowledgements describe reported outcomes, not an atomic transaction. Unconfirmed or interrupted writes may have changed memory; inspect the game before further edits.",
+        &ui.tr(
+            "Acknowledgements describe reported outcomes, not an atomic transaction. Unconfirmed or interrupted writes may have changed memory; inspect the game before further edits.",
+        ),
     );
     if let Some(reason) = &report.session_closed {
         wrapped(
             ui,
-            &format!("Session closed: {reason}. This record has no write or navigation authority."),
+            &format!(
+                "{} {reason}. {}",
+                ui.tr("Session closed:"),
+                ui.tr("This record has no write or navigation authority.")
+            ),
         );
     }
     if let Some(reason) = &report.undo_unavailable_reason {
-        wrapped(ui, &format!("Undo unavailable: {reason}"));
+        wrapped(ui, &format!("{} {reason}", ui.tr("Undo unavailable:")));
     }
     for (index, change) in report.changes.iter().enumerate() {
         ui.separator();
         short(
             ui,
-            &format!("Physical change {}: {}", index + 1, change.field),
+            &format!(
+                "{} {}: {}",
+                ui.tr("Physical change"),
+                index + 1,
+                change.field
+            ),
         );
         values(ui, &change.before, &change.after);
         for attempt in &change.attempts {
             let operation = match attempt.operation {
-                Operation::Apply => "Apply",
-                Operation::Undo => "Undo",
+                Operation::Apply => ui.tr("Apply"),
+                Operation::Undo => ui.tr("Undo"),
             };
             let outcome = match attempt.outcome {
-                AttemptOutcome::Pending => "Pending acknowledgement",
-                AttemptOutcome::Confirmed => "Confirmed",
-                AttemptOutcome::Refused => "Refused before write",
-                AttemptOutcome::Unconfirmed => "Unconfirmed — outcome unknown",
-                AttemptOutcome::Interrupted => "Interrupted — outcome unknown",
+                AttemptOutcome::Pending => ui.tr("Pending acknowledgement"),
+                AttemptOutcome::Confirmed => ui.tr("Confirmed"),
+                AttemptOutcome::Refused => ui.tr("Refused before write"),
+                AttemptOutcome::Unconfirmed => ui.tr("Unconfirmed — outcome unknown"),
+                AttemptOutcome::Interrupted => ui.tr("Interrupted — outcome unknown"),
             };
             wrapped(
                 ui,
@@ -441,18 +458,30 @@ fn details(ui: &mut egui::Ui, report: &ActionReport) {
                 ),
             );
             if let Some(completed) = attempt.completed_at {
-                wrapped(ui, &format!("Completed: {}", utc_datetime(completed)));
+                wrapped(
+                    ui,
+                    &format!("{} {}", ui.tr("Completed:"), utc_datetime(completed)),
+                );
             }
             if let Some(message) = &attempt.message {
-                short(ui, &format!("Acknowledgement message / warning: {message}"));
+                short(
+                    ui,
+                    &format!("{} {message}", ui.tr("Acknowledgement message / warning:")),
+                );
             }
         }
-        egui::CollapsingHeader::new("Technical information (read-only)")
+        egui::CollapsingHeader::new(ui.tr("Technical information (read-only)"))
             .id_salt((index, "technical"))
             .show(ui, |ui| {
-                wrapped(ui, &format!("Address: 0x{:X}", change.address));
-                wrapped(ui, &format!("Raw before: {}", raw_preview(&change.old_raw)));
-                wrapped(ui, &format!("Raw after: {}", raw_preview(&change.new_raw)));
+                wrapped(ui, &format!("{} 0x{:X}", ui.tr("Address:"), change.address));
+                wrapped(
+                    ui,
+                    &format!("{} {}", ui.tr("Raw before:"), raw_preview(&change.old_raw)),
+                );
+                wrapped(
+                    ui,
+                    &format!("{} {}", ui.tr("Raw after:"), raw_preview(&change.new_raw)),
+                );
             });
     }
 }
@@ -589,10 +618,15 @@ mod tests {
             ActionStatus::UndoRefused,
             ActionStatus::UndoUnconfirmed,
         ];
+        // The default Active view hides fully undone actions.
+        assert!(!history.matches(&fixture(ActionStatus::Undone), &context()));
+        assert!(history.matches(&fixture(ActionStatus::Applied), &context()));
+        history.status = StatusFilter::All;
         for status in statuses {
             assert!(history.matches(&fixture(status), &context()));
         }
         for (filter, expected) in [
+            (StatusFilter::Active, 9),
             (StatusFilter::All, 10),
             (StatusFilter::Pending, 2),
             (StatusFilter::Applied, 1),
@@ -653,6 +687,8 @@ mod tests {
     #[test]
     fn old_and_closed_sessions_are_opt_in_and_never_navigable() {
         let mut history = HistoryUi::default();
+        // This test exercises session opt-in, not status filtering.
+        history.status = StatusFilter::All;
         let mut report = fixture(ActionStatus::Undone);
         report.session_id = 1;
         assert!(!history.matches(&report, &context()));
@@ -1004,6 +1040,8 @@ mod tests {
             report.submitted_at += Duration::from_secs(10 - index as u64);
             report.updated_at += Duration::from_secs(index as u64);
         }
+        // Undone rows only appear when the filter asks for them.
+        history.status = StatusFilter::All;
         frame(&mut history, &ctx, &reports, context(), vec![], 1280.0);
         let (action, output) = frame(&mut history, &ctx, &reports, context(), vec![], 1280.0);
         assert!(action.is_none());
@@ -1013,6 +1051,12 @@ mod tests {
         for status in ["Refused", "Undone", "Unconfirmed"] {
             assert!(text.contains(status));
         }
+        history.status = StatusFilter::default();
+        let (_, active_output) = frame(&mut history, &ctx, &reports, context(), vec![], 1280.0);
+        let active_text = rendered_text(&active_output);
+        assert!(!active_text.contains("Undone"));
+        assert!(active_text.contains("Refused"));
+        assert!(active_text.contains("Unconfirmed"));
         assert_eq!(
             history
                 .controls

@@ -2283,6 +2283,17 @@ fn cached_staff_view(cached: &CachedStaff, build: GameBuild) -> StaffView {
 }
 
 fn history_path() -> std::path::PathBuf {
+    // Tests must never read or write the user's real audit trail: every
+    // call hands out a fresh unique path so app-level tests start empty.
+    if cfg!(test) {
+        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        return std::env::temp_dir().join(format!(
+            "fm_editor_test_history_{}_{}.json",
+            std::process::id(),
+            n
+        ));
+    }
     dirs::config_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("fm-editor")
