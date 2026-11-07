@@ -248,6 +248,13 @@ fn show_finance(
     // Each row edits the sub-record its schema location names (FM26 keeps the
     // budgets in a finance → budget sub-record, FM27 in the finance object).
     let mut shown = false;
+    let cur = crate::i18n::currency(ui.ctx());
+    let period = crate::i18n::wage_period(ui.ctx());
+    let period_word = match period {
+        crate::settings::WagePeriod::Weekly => ui.tr("weekly"),
+        crate::settings::WagePeriod::Monthly => ui.tr("monthly"),
+        crate::settings::WagePeriod::Yearly => ui.tr("yearly"),
+    };
     // Labels come from the schema. FM27 has no editable wage budget: its
     // budget and current wage total are shown read-only below.
     for key in [
@@ -262,14 +269,15 @@ fn show_finance(
         let Some(field) = schemas.field(key) else {
             continue;
         };
-        let label = if key == "c_wage_budget" {
-            format!("{} (p/w)", field.label)
+        let wage_row = key == "c_wage_budget";
+        let label = if wage_row {
+            format!("{} ({})", ui.tr(field.label), period_word)
         } else {
-            field.label.to_string()
+            ui.tr(field.label)
         };
-        let label = label.as_str();
+        let factor = cur.factor() * if wage_row { period.factor() } else { 1.0 };
         if let Some((buf, base)) = club.sub_record_mut(container) {
-            u32_drag(ui, &ui.tr(label), buf, offset, base, edits);
+            u32_drag(ui, &label, buf, offset, base, edits, factor);
             shown = true;
         }
     }
@@ -281,7 +289,7 @@ fn show_finance(
             continue;
         };
         if let Some((buf, base)) = club.sub_record_mut(container) {
-            f32_drag(ui, &ui.tr(label), buf, offset, base, edits);
+            f32_drag(ui, &ui.tr(label), buf, offset, base, edits, cur.factor());
             shown = true;
         }
     }
@@ -296,12 +304,19 @@ fn show_finance(
             continue;
         };
         if let Some(v) = fields::read_field_u32(club, &club.raw, field) {
-            let label = if matches!(key, "c_wage_total" | "c_wage_spend") {
-                format!("{} (p/w)", field.label)
+            let wage_row = matches!(key, "c_wage_total" | "c_wage_spend");
+            let label = if wage_row {
+                format!("{} ({})", ui.tr(field.label), period_word)
             } else {
-                field.label.to_string()
+                ui.tr(field.label)
             };
-            field_widget::info_label(ui, &label, v);
+            let factor = cur.factor() * if wage_row { period.factor() } else { 1.0 };
+            let shown_v = (v as f64 * factor).round() as u64;
+            field_widget::info_label(
+                ui,
+                &label,
+                format!("{} {}", crate::i18n::thousands(shown_v), cur.symbol()),
+            );
             shown = true;
         }
     }
@@ -451,6 +466,7 @@ fn u32_drag(
     offset: usize,
     base_addr: u64,
     edits: &mut Vec<FieldEdit>,
+    factor: f64,
 ) {
     if offset + 4 > raw.len() {
         return;
@@ -460,18 +476,36 @@ fn u32_drag(
     let mut val = old_val as i64;
     let enabled = navigation::editing_enabled(ui);
     let mut changed = false;
+    let cur = crate::i18n::currency(ui.ctx());
+    // High-bit values have unverified signedness: render them raw and keep
+    // the guarded history text instead of claiming a money conversion.
+    let verified = old_val & 0x8000_0000 == 0;
+    let fmt = |v: u32| {
+        if v & 0x8000_0000 != 0 {
+            u32_value(label, v)
+        } else {
+            format!(
+                "{} {}",
+                crate::i18n::thousands(((v as f64 * factor).round()) as u64),
+                cur.symbol()
+            )
+        }
+    };
     ui.horizontal(|ui| {
         ui.label(label);
         changed = ui
             .add_enabled_ui(enabled, |ui| {
-                ui.add_sized(
-                    [44.0, 22.0],
-                    egui::DragValue::new(&mut val)
-                        .update_while_editing(false)
-                        .range(0i64..=4_294_967_295i64)
-                        .speed(1.0),
-                )
-                .changed()
+                let drag = egui::DragValue::new(&mut val)
+                    .update_while_editing(false)
+                    .range(0i64..=4_294_967_295i64)
+                    .speed(1.0);
+                let drag = if verified {
+                    drag.custom_formatter(crate::i18n::money_drag_formatter(factor, cur.symbol()))
+                        .custom_parser(crate::i18n::money_drag_parser(factor))
+                } else {
+                    drag
+                };
+                ui.add_sized([100.0, 22.0], drag).changed()
             })
             .inner;
     });
@@ -484,11 +518,11 @@ fn u32_drag(
                 addr: base_addr + offset as u64,
                 old_raw: old_bytes.to_vec(),
                 new_raw: new_bytes.to_vec(),
-                description: format!("{label}: {old_val} \u{2192} {new_val}"),
+                description: format!("{label}: {} \u{2192} {}", fmt(old_val), fmt(new_val)),
                 presentation: Some(crate::edit_history::EditPresentation::new(
                     label,
-                    u32_value(label, old_val),
-                    u32_value(label, new_val),
+                    fmt(old_val),
+                    fmt(new_val),
                 )),
             });
         }
@@ -503,6 +537,7 @@ fn f32_drag(
     offset: usize,
     base_addr: u64,
     edits: &mut Vec<FieldEdit>,
+    factor: f64,
 ) {
     if offset + 4 > raw.len() {
         return;
@@ -523,17 +558,27 @@ fn f32_drag(
     let mut val = old_val;
     let enabled = navigation::editing_enabled(ui);
     let mut changed = false;
+    let cur = crate::i18n::currency(ui.ctx());
+    let fmt = |v: f32| {
+        format!(
+            "{} {}",
+            crate::i18n::thousands(((v as f64 * factor).round() as i64).max(0) as u64),
+            cur.symbol()
+        )
+    };
     ui.horizontal(|ui| {
         ui.label(label);
         changed = ui
             .add_enabled_ui(enabled, |ui| {
                 ui.add_sized(
-                    [44.0, 22.0],
+                    [100.0, 22.0],
                     egui::DragValue::new(&mut val)
                         .update_while_editing(false)
                         .range(0.0f32..=100_000.0f32)
                         .clamp_existing_to_range(false)
-                        .speed(0.5),
+                        .speed(0.5)
+                        .custom_formatter(crate::i18n::money_drag_formatter(factor, cur.symbol()))
+                        .custom_parser(crate::i18n::money_drag_parser(factor)),
                 )
                 .changed()
             })
@@ -546,11 +591,11 @@ fn f32_drag(
             addr: base_addr + offset as u64,
             old_raw: old_bytes.to_vec(),
             new_raw: new_bytes.to_vec(),
-            description: format!("{label}: {old_val:.0} \u{2192} {val:.0}"),
+            description: format!("{label}: {} \u{2192} {}", fmt(old_val), fmt(val)),
             presentation: Some(crate::edit_history::EditPresentation::new(
                 label,
-                field_widget::money_value(label, old_val),
-                field_widget::money_value(label, val),
+                fmt(old_val),
+                fmt(val),
             )),
         });
     }
@@ -648,12 +693,13 @@ mod tests {
                 },
                 |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        u32_drag(ui, "Balance", &mut raw, 0, 0x20000, &mut edits);
+                        u32_drag(ui, "Balance", &mut raw, 0, 0x20000, &mut edits, 1.0);
                     });
                 },
             )
         };
         let output = frame(vec![]);
+        // High-bit (unverified signedness) values stay raw, unformatted.
         let pos = text_position(&output.shapes, &old.to_string());
         frame(vec![
             egui::Event::PointerMoved(pos),
@@ -689,7 +735,8 @@ mod tests {
             "raw u32 4294967046 (0xFFFFFF06; signedness unverified)"
         );
         assert!(!p.before.contains("GBP"));
-        assert_eq!(p.after, "250 GBP");
+        // factor 1.0 here: 250 internal → "250 £" with separators/symbol only.
+        assert_eq!(p.after, "250 £");
         assert_eq!(u32_value("Wage Budget (p/w)", 500), "500 GBP/week");
         assert!(u32_value("Balance", 0x8000_0000).contains("signedness unverified"));
     }
@@ -728,7 +775,7 @@ mod tests {
         let mut edits = Vec::new();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                f32_drag(ui, "Price", &mut raw, 0, 0x1000, &mut edits);
+                f32_drag(ui, "Price", &mut raw, 0, 0x1000, &mut edits, 1.0);
             });
         });
         (edits, raw)

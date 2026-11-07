@@ -379,7 +379,12 @@ fn show_personal_details(
             field_widget::info_label(
                 ui,
                 "Wage",
-                format_wage(wage, wage_period, crate::i18n::language(ui.ctx())),
+                format_wage(
+                    wage,
+                    wage_period,
+                    crate::i18n::language(ui.ctx()),
+                    crate::i18n::currency(ui.ctx()),
+                ),
             );
         }
     });

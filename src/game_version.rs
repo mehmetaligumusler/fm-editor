@@ -177,7 +177,7 @@ impl GameBuild {
     pub fn display_name(self) -> &'static str {
         match self {
             GameBuild::Fm27GamePass => "FM27 Game Pass",
-            GameBuild::Fm24Epic => "FM24 Epic",
+            GameBuild::Fm24Epic => "FM24",
             other => other.version().display_name(),
         }
     }

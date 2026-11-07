@@ -30,6 +30,67 @@ impl Language {
     }
 }
 
+pub fn set_currency(ctx: &egui::Context, currency: crate::settings::Currency) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("fm_currency"), currency));
+}
+
+pub fn currency(ctx: &egui::Context) -> crate::settings::Currency {
+    ctx.data_mut(|d| d.get_temp::<crate::settings::Currency>(egui::Id::new("fm_currency")))
+        .unwrap_or_default()
+}
+
+pub fn set_wage_period(ctx: &egui::Context, period: crate::settings::WagePeriod) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("fm_wage_period"), period));
+}
+
+pub fn wage_period(ctx: &egui::Context) -> crate::settings::WagePeriod {
+    ctx.data_mut(|d| d.get_temp::<crate::settings::WagePeriod>(egui::Id::new("fm_wage_period")))
+        .unwrap_or_default()
+}
+
+/// 3667769 → "3,667,769" (game-style thousands separators).
+pub fn thousands(v: u64) -> String {
+    let digits = v.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Internal GBP amount → display currency with separators and symbol,
+/// e.g. 3,663,276 → "4,273,079 €".
+pub fn format_money(gbp: u64, cur: crate::settings::Currency) -> String {
+    let v = (gbp as f64 * cur.factor()).round() as u64;
+    format!("{} {}", thousands(v), cur.symbol())
+}
+
+/// DragValue display formatter for money drags: internal GBP → display value.
+pub fn money_drag_formatter(
+    factor: f64,
+    symbol: &str,
+) -> impl Fn(f64, std::ops::RangeInclusive<usize>) -> String + 'static {
+    let symbol = symbol.to_owned();
+    move |v, _| {
+        let shown = ((v * factor).round() as i64).max(0) as u64;
+        format!("{} {}", thousands(shown), symbol)
+    }
+}
+
+/// DragValue parser for money drags: display value → internal GBP.
+pub fn money_drag_parser(factor: f64) -> impl Fn(&str) -> Option<f64> + 'static {
+    move |s| {
+        let cleaned: String = s
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+            .collect();
+        cleaned.parse::<f64>().ok().map(|v| v / factor)
+    }
+}
+
 pub fn set_language(ctx: &egui::Context, lang: Language) {
     ctx.data_mut(|d| d.insert_temp(egui::Id::new("fm_language"), lang));
 }
@@ -653,6 +714,10 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("familiarity", "uyum"),
         ("room", "pay"),
         ("fit", "form"),
+        ("Currency", "Para Birimi"),
+        ("weekly", "haftalık"),
+        ("monthly", "aylık"),
+        ("yearly", "yıllık"),
         // ── Morale words (FM Turkish Dynamics morale scale) ───────────────
         ("Fair", "İdare Eder"),
         ("Okay", "Orta"),
@@ -822,6 +887,31 @@ mod tests {
                 "Uzun Taç",
             ]
         );
+    }
+
+    #[test]
+    fn thousands_separators_match_the_game_style() {
+        assert_eq!(thousands(0), "0");
+        assert_eq!(thousands(999), "999");
+        assert_eq!(thousands(1000), "1,000");
+        assert_eq!(thousands(3_667_769), "3,667,769");
+        let eur = crate::settings::Currency::Eur;
+        // Witnessed 2026-11-07: internal 4,100,645 renders 4,782,290 € in game.
+        assert_eq!(format_money(4_100_645, eur), "4,782,290 €");
+    }
+
+    #[test]
+    fn money_drag_round_trips_through_the_currency_factor() {
+        let fmt = money_drag_formatter(1.166_228_8, "€");
+        let parse = money_drag_parser(1.166_228_8);
+        let shown = fmt(4_100_645.0, 0..=usize::MAX);
+        assert_eq!(shown, "4,782,290 €");
+        let back = parse(&shown).unwrap();
+        assert!((back - 4_100_645.0).abs() < 0.51);
+        let internal = 1_234_567.0;
+        let shown = fmt(internal, 0..=usize::MAX);
+        let back = parse(&shown).unwrap();
+        assert!((back - internal).abs() < 0.51);
     }
 
     #[test]

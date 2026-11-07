@@ -88,6 +88,42 @@ impl Scale {
     }
 }
 
+// ─── Currency ─────────────────────────────────────────────────────────────────
+
+/// Display currency. FM stores all money as GBP internally; the Euro rate is
+/// the fixed conversion witnessed in the user's game (2026-11-07:
+/// 4,100,645 internal → 4,782,290 € on the finance screen, i.e. ×1.1662286).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Currency {
+    #[default]
+    Gbp,
+    Eur,
+}
+
+impl Currency {
+    pub fn label(self) -> &'static str {
+        match self {
+            Currency::Gbp => "£ GBP",
+            Currency::Eur => "€ EUR",
+        }
+    }
+
+    /// Internal GBP → display currency multiplier.
+    pub fn factor(self) -> f64 {
+        match self {
+            Currency::Gbp => 1.0,
+            Currency::Eur => 1.166_228_8,
+        }
+    }
+
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Currency::Gbp => "£",
+            Currency::Eur => "€",
+        }
+    }
+}
+
 // ─── Wage Period ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -99,6 +135,15 @@ pub enum WagePeriod {
 }
 
 impl WagePeriod {
+    /// Weekly = 1; monthly ≈ ×4.333; yearly = ×52 (matches format_wage).
+    pub fn factor(self) -> f64 {
+        match self {
+            WagePeriod::Weekly => 1.0,
+            WagePeriod::Monthly => 4.333,
+            WagePeriod::Yearly => 52.0,
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             WagePeriod::Weekly => "Weekly",
@@ -110,14 +155,20 @@ impl WagePeriod {
 
 /// Format a weekly wage value according to the chosen display period.
 /// FM stores wages as weekly integers. Monthly ≈ ×4.333, yearly ≈ ×52.
-pub fn format_wage(weekly: u32, period: WagePeriod, lang: crate::i18n::Language) -> String {
-    let amount = match period {
-        WagePeriod::Weekly => weekly,
-        WagePeriod::Monthly => (weekly as f64 * 4.333).round() as u32,
-        WagePeriod::Yearly => weekly * 52,
-    };
+pub fn format_wage(
+    weekly: u32,
+    period: WagePeriod,
+    lang: crate::i18n::Language,
+    currency: Currency,
+) -> String {
+    let amount = (weekly as f64 * period.factor() * currency.factor()).round() as u64;
     let suffix = crate::i18n::wage_suffix(period, lang);
-    format!("{amount}{suffix}")
+    format!(
+        "{} {}{}",
+        crate::i18n::thousands(amount),
+        currency.symbol(),
+        suffix
+    )
 }
 
 // ─── AppSettings ─────────────────────────────────────────────────────────────
@@ -136,6 +187,9 @@ pub struct AppSettings {
     pub language: crate::i18n::Language,
     #[serde(default)]
     pub wage_period: WagePeriod,
+    /// Money display currency (memory values stay GBP).
+    #[serde(default)]
+    pub currency: Currency,
     /// Directory containing `<uid>.png` face pack images.
     /// None = face images disabled.
     #[serde(default)]

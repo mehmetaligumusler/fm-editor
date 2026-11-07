@@ -953,7 +953,23 @@ impl eframe::App for FmEditorApp {
                 });
 
                 ui.menu_button(ui.tr("Settings"), |ui| {
-                    ui.menu_button("Language", |ui| {
+                    ui.menu_button(ui.tr("Currency"), |ui| {
+                        for cur in [
+                            crate::settings::Currency::Gbp,
+                            crate::settings::Currency::Eur,
+                        ] {
+                            if ui
+                                .selectable_label(self.settings.currency == cur, cur.label())
+                                .clicked()
+                            {
+                                self.settings.currency = cur;
+                                crate::i18n::set_currency(ctx, cur);
+                                self.settings.save();
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.menu_button(ui.tr("Language"), |ui| {
                         for lang in [
                             crate::i18n::Language::English,
                             crate::i18n::Language::Turkish,

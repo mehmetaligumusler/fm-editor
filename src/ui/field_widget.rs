@@ -503,17 +503,22 @@ pub fn raw_u32_edit(
     let old_val = u32::from_le_bytes(old_bytes);
     let mut val = old_val as i64;
     let mut changed = false;
+    let cur = crate::i18n::currency(ui.ctx());
+    let money = is_money_label(label);
+    let factor = if money { cur.factor() } else { 1.0 };
 
     ui.horizontal(|ui| {
         profile_label(ui, label);
-        changed = number_edit(
-            ui,
-            egui::DragValue::new(&mut val)
-                .update_while_editing(false)
-                .range(0..=u32::MAX as i64)
-                .speed(100.0),
-            70.0,
-        );
+        let mut drag = egui::DragValue::new(&mut val)
+            .update_while_editing(false)
+            .range(0..=u32::MAX as i64)
+            .speed(100.0);
+        if money {
+            drag = drag
+                .custom_formatter(crate::i18n::money_drag_formatter(factor, cur.symbol()))
+                .custom_parser(crate::i18n::money_drag_parser(factor));
+        }
+        changed = number_edit(ui, drag, 90.0);
     });
 
     if changed {
@@ -1265,6 +1270,19 @@ pub fn money_edit_at(
             optional_money_value(label, new, allow_unset),
         )),
     })
+}
+
+/// Labels whose values are money in memory (internal GBP) and therefore get
+/// the display-currency conversion and thousands separators on their drags.
+pub(super) fn is_money_label(label: &str) -> bool {
+    let l = label.to_ascii_lowercase();
+    l.contains("wage")
+        || l.contains("budget")
+        || l.contains("balance")
+        || l.contains("(p/w)")
+        || l.contains("ticket")
+        || l.contains("price")
+        || l.contains("value")
 }
 
 /// Memory money values are GBP, irrespective of the display currency/period.
