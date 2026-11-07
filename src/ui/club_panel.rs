@@ -250,11 +250,6 @@ fn show_finance(
     let mut shown = false;
     let cur = crate::i18n::currency(ui.ctx());
     let period = crate::i18n::wage_period(ui.ctx());
-    let period_word = match period {
-        crate::settings::WagePeriod::Weekly => ui.tr("weekly"),
-        crate::settings::WagePeriod::Monthly => ui.tr("monthly"),
-        crate::settings::WagePeriod::Yearly => ui.tr("yearly"),
-    };
     // Labels come from the schema. FM27 has no editable wage budget: its
     // budget and current wage total are shown read-only below.
     for key in [
@@ -270,11 +265,7 @@ fn show_finance(
             continue;
         };
         let wage_row = key == "c_wage_budget";
-        let label = if wage_row {
-            format!("{} ({})", ui.tr(field.label), period_word)
-        } else {
-            ui.tr(field.label)
-        };
+        let label = ui.tr(field.label);
         let factor = cur.factor() * if wage_row { period.factor() } else { 1.0 };
         if let Some((buf, base)) = club.sub_record_mut(container) {
             u32_drag(ui, &label, buf, offset, base, edits, factor);
@@ -305,11 +296,7 @@ fn show_finance(
         };
         if let Some(v) = fields::read_field_u32(club, &club.raw, field) {
             let wage_row = matches!(key, "c_wage_total" | "c_wage_spend");
-            let label = if wage_row {
-                format!("{} ({})", ui.tr(field.label), period_word)
-            } else {
-                ui.tr(field.label)
-            };
+            let label = ui.tr(field.label);
             let factor = cur.factor() * if wage_row { period.factor() } else { 1.0 };
             let shown_v = (v as f64 * factor).round() as u64;
             field_widget::info_label(

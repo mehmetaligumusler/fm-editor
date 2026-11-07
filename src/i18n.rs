@@ -408,7 +408,7 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("Contract Expiry", "Sözleşme Bitişi"),
         ("Contract Start", "Sözleşme Başlangıcı"),
         ("Contract Signed", "İmza Tarihi"),
-        ("Wage (£ p/w)", "Maaş (£/hafta)"),
+        ("Wage (£ p/w)", "Maaş"),
         ("Weekly Wage", "Haftalık Maaş"),
         ("Squad Status", "Forma Süresi"),
         ("Squad Number", "Forma Numarası"),
