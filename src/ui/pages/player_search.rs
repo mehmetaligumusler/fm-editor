@@ -314,7 +314,7 @@ pub fn filter_row(
     ui.horizontal_wrapped(|ui| {
         ui.label(ui.tr("Name/UID:"));
         ui.add(egui::TextEdit::singleline(&mut state.query)
-            .desired_width(220.0).hint_text("Name or exact UID"))
+            .desired_width(220.0).hint_text(ui.tr("Name or exact UID")))
             .on_hover_text("Live search: all name words must match (case-insensitive), or enter an exact numeric UID. Filters combine with AND; bounds are inclusive.");
     });
     ui.horizontal_wrapped(|ui| {
@@ -334,7 +334,7 @@ pub fn filter_row(
         });
         ui.add_enabled(
             my_clubs.is_some() || state.my_clubs,
-            egui::Checkbox::new(&mut state.my_clubs, "My clubs"),
+            egui::Checkbox::new(&mut state.my_clubs, &ui.tr("My clubs")),
         )
         .on_hover_text(my_clubs.map_or("Managed club unavailable", |c| c.label.as_str()))
         .on_disabled_hover_text(
@@ -342,9 +342,9 @@ pub fn filter_row(
         );
         let count = advanced_filter_count(state);
         let label = if count > 0 {
-            format!("Advanced ({count})")
+            format!("{} ({count})", ui.tr("Advanced"))
         } else {
-            "Advanced".into()
+            ui.tr("Advanced")
         };
         advanced_clicked = ui.button(label).clicked();
         if ui.button(ui.tr("Reset all")).clicked() {

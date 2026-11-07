@@ -765,7 +765,7 @@ fn calendar_button(
     years: &std::ops::RangeInclusive<u16>,
 ) -> Option<(u16, i32, i32)> {
     let enabled = navigation::editing_enabled(ui) && ui.is_enabled();
-    let button = ui.add_enabled(enabled, egui::Button::new("Calendar"));
+    let button = ui.add_enabled(enabled, egui::Button::new(ui.tr("Calendar")));
     if !enabled {
         if ui.memory(|memory| memory.is_popup_open(id)) {
             ui.memory_mut(|memory| memory.close_popup());

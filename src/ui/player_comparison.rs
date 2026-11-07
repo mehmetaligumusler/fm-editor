@@ -3,6 +3,7 @@
 use crate::fields::{Category, Encoding, FieldLocation, HasSubRecords};
 use crate::game_date::GameDate;
 use crate::game_version::GameBuild;
+use crate::i18n::UiTr;
 use crate::player::PlayerRecord;
 use eframe::egui;
 
@@ -200,16 +201,16 @@ impl PlayerComparison {
             let selected_here = self.slots[0].as_ref().is_some_and(|s| Some(s.identity) == identity);
             if selected_here {
                 ui.add_enabled(false, egui::Button::new("Selected for compare"));
-                if ui.button("Clear selection").clicked() {
+                if ui.button(ui.tr("Clear selection")).clicked() {
                     self.clear();
                 }
             } else {
                 if self.slots[0].is_some()
-                    && ui.add_enabled(can_capture, egui::Button::new("Compare with selected")).clicked()
+                    && ui.add_enabled(can_capture, egui::Button::new(ui.tr("Compare with selected"))).clicked()
                 {
                     self.capture(1, player, today, enabled);
                 }
-                if ui.add_enabled(can_capture, egui::Button::new("Select for compare")).clicked() {
+                if ui.add_enabled(can_capture, egui::Button::new(ui.tr("Select for compare"))).clicked() {
                     self.capture(0, player, today, enabled);
                 }
             }
@@ -229,7 +230,10 @@ impl PlayerComparison {
 
     pub fn toolbar(&mut self, ui: &mut egui::Ui) {
         let count = self.slots.iter().flatten().count();
-        if ui.button(format!("Compare players ({count}/2)")).clicked() {
+        if ui
+            .button(format!("{} ({count}/2)", ui.tr("Compare players")))
+            .clicked()
+        {
             self.open = true;
         }
     }
@@ -249,7 +253,7 @@ impl PlayerComparison {
             .vscroll(false)
             .show(ctx, |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button("Clear selection").clicked() {
+                    if ui.button(ui.tr("Clear selection")).clicked() {
                         self.slots = [None, None];
                         self.message = None;
                     }

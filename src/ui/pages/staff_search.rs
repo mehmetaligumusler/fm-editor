@@ -248,7 +248,7 @@ pub fn filter_row(ui: &mut egui::Ui, state: &mut StaffSearchState) {
         ui.label(ui.tr("Name/UID:"));
         ui.add_sized(
             [220.0, 20.0],
-            egui::TextEdit::singleline(&mut state.query).hint_text("Name or exact UID"),
+            egui::TextEdit::singleline(&mut state.query).hint_text(ui.tr("Name or exact UID")),
         ).on_hover_text("Live search: numeric queries match an exact UID. Otherwise all words must occur in the name (case-insensitive, any order). Filters are combined with AND; bounds are inclusive.");
     });
     ui.horizontal_wrapped(|ui| {
@@ -267,18 +267,18 @@ pub fn filter_row(ui: &mut egui::Ui, state: &mut StaffSearchState) {
             ui.add_sized([36.0, 20.0], egui::TextEdit::singleline(&mut state.age_max));
         });
         ui.horizontal(|ui| {
-            ui.label("Role:");
+            ui.label(ui.tr("Role:"));
             let current_label = ROLE_FILTER_OPTIONS
                 .iter()
                 .find(|(idx, _)| *idx == state.role)
                 .map(|(_, label)| *label)
                 .unwrap_or("All Roles");
             egui::ComboBox::from_id_salt("staff_role_filter")
-                .selected_text(current_label)
+                .selected_text(ui.tr(current_label))
                 .width(150.0)
                 .show_ui(ui, |ui| {
                     for (idx, label) in ROLE_FILTER_OPTIONS {
-                        ui.selectable_value(&mut state.role, *idx, *label);
+                        ui.selectable_value(&mut state.role, *idx, &ui.tr(*label));
                     }
                 });
         });

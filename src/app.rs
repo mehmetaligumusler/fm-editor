@@ -941,7 +941,7 @@ impl eframe::App for FmEditorApp {
         // ===== Menu bar =====
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
+                ui.menu_button(ui.tr("File"), |ui| {
                     if ui.button("Load Save").clicked() {
                         reload_save_clicked = true;
                         ui.close_menu();
@@ -952,17 +952,14 @@ impl eframe::App for FmEditorApp {
                     }
                 });
 
-                ui.menu_button("Settings", |ui| {
+                ui.menu_button(ui.tr("Settings"), |ui| {
                     ui.menu_button("Language", |ui| {
                         for lang in [
                             crate::i18n::Language::English,
                             crate::i18n::Language::Turkish,
                         ] {
                             if ui
-                                .selectable_label(
-                                    self.settings.language == lang,
-                                    lang.label(),
-                                )
+                                .selectable_label(self.settings.language == lang, lang.label())
                                 .clicked()
                             {
                                 self.settings.language = lang;
@@ -1179,7 +1176,12 @@ impl eframe::App for FmEditorApp {
                     }
                 }
                 ui.add_space(12.0);
-                ui.label(egui::RichText::new(ui.tr("MANAGEMENT")).small().strong().weak());
+                ui.label(
+                    egui::RichText::new(ui.tr("MANAGEMENT"))
+                        .small()
+                        .strong()
+                        .weak(),
+                );
                 let selected = self.active_page == Page::HumanManager;
                 if ui
                     .add_sized(
@@ -1318,8 +1320,13 @@ impl eframe::App for FmEditorApp {
                 ui.separator();
                 if let Some(ref c) = self.entity_counts {
                     ui.label(format!(
-                        "Players: {}  Staff: {}  Clubs: {}",
-                        c.players, c.staff, c.clubs
+                        "{} {}  {} {}  {} {}",
+                        ui.tr("Players:"),
+                        c.players,
+                        ui.tr("Staff:"),
+                        c.staff,
+                        ui.tr("Clubs:"),
+                        c.clubs
                     ));
                 }
                 ui.separator();
@@ -1436,9 +1443,9 @@ impl eframe::App for FmEditorApp {
                     // The count reflects the CURRENT search results, not
                     // the total entity count in the save.
                     let count_text = match self.active_page {
-                        Page::PlayerSearch => format!("Results ({})", player_filtered.len()),
-                        Page::StaffSearch  => format!("Results ({})", staff_filtered.len()),
-                        Page::ClubSearch   => format!("Results ({})", club_filtered.len()),
+                        Page::PlayerSearch => format!("{} ({})", ui.tr("Results"), player_filtered.len()),
+                        Page::StaffSearch  => format!("{} ({})", ui.tr("Results"), staff_filtered.len()),
+                        Page::ClubSearch   => format!("{} ({})", ui.tr("Results"), club_filtered.len()),
                         Page::HumanManager | Page::BestXi => "Results".to_string(),
                     };
                     let mut close_idx: Option<usize> = None;

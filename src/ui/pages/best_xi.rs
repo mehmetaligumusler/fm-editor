@@ -2,6 +2,7 @@
 use crate::best_xi::{self, Candidate, FORMATIONS, Lineup};
 use crate::cache::EntityCache;
 use crate::fields::VersionedSchemas;
+use crate::i18n::UiTr;
 use eframe::egui;
 use std::sync::Arc;
 
@@ -73,13 +74,16 @@ pub fn show(
     }
     let previous = (state.club, state.formation, state.growth, state.minimum);
     ui.horizontal_wrapped(|ui| {
-        ui.label("Club:");
-        let label = state.club.and_then(|id| cache.club_names.get(&id)).map(String::as_str)
-            .unwrap_or("Managed clubs");
+        ui.label(ui.tr("Club:"));
+        let label = state
+            .club
+            .and_then(|id| cache.club_names.get(&id))
+            .map(String::from)
+            .unwrap_or_else(|| ui.tr("Managed clubs"));
         egui::ComboBox::from_id_salt("best_xi_club").selected_text(label).width(185.0)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show_ui(ui, |ui| {
             ui.add(egui::TextEdit::singleline(&mut state.club_query).hint_text("Name or club UID"));
-            if ui.selectable_value(&mut state.club, None, "Managed clubs").clicked() { ui.memory_mut(|m| m.close_popup()); }
+            if ui.selectable_value(&mut state.club, None, &ui.tr("Managed clubs")).clicked() { ui.memory_mut(|m| m.close_popup()); }
             let query = state.club_query.trim().to_lowercase();
             let mut clubs: Vec<_> = cache.clubs.iter().filter(|c| query.is_empty() || c.name.to_lowercase().contains(&query) || c.uid.to_string() == query).collect();
             clubs.sort_by(|a, b| a.name.cmp(&b.name).then(a.uid.cmp(&b.uid)));
@@ -90,23 +94,23 @@ pub fn show(
                 if clubs.len() > 150 { ui.weak("Type a name or club UID to narrow the list."); }
             });
         });
-        ui.label("Tactic:");
+        ui.label(ui.tr("Tactic:"));
         egui::ComboBox::from_id_salt("best_xi_formation").selected_text(FORMATIONS[state.formation].name).show_ui(ui, |ui| {
             for (i, f) in FORMATIONS.iter().enumerate() { ui.selectable_value(&mut state.formation, i, f.name); }
         });
-        ui.toggle_value(&mut state.growth, "Room to grow").on_hover_text("Off: strongest positional attributes. On: remaining PA − CA, then positional fit. Headroom estimates growth capacity, not development speed; late-bloomer status is unknown.");
+        ui.toggle_value(&mut state.growth, &ui.tr("Room to grow")).on_hover_text("Off: strongest positional attributes. On: remaining PA − CA, then positional fit. Headroom estimates growth capacity, not development speed; late-bloomer status is unknown.");
     });
     ui.horizontal_wrapped(|ui| {
-        ui.label("Minimum familiarity:");
+        ui.label(ui.tr("Minimum familiarity:"));
         ui.add(egui::DragValue::new(&mut state.minimum).range(1..=20))
             .on_hover_text("15 = accomplished; 20 = natural");
-        ui.checkbox(&mut state.bench_only, "Alternatives outside XI");
+        ui.checkbox(&mut state.bench_only, &ui.tr("Alternatives outside XI"));
     });
     if state.club.is_none() {
         if let Some(clubs) = &cache.my_clubs {
             ui.label(&clubs.label);
         } else {
-            ui.label("Managed clubs unavailable. Select a club by name or UID.");
+            ui.label(ui.tr("Managed clubs unavailable. Select a club by name or UID."));
             return None;
         }
     }

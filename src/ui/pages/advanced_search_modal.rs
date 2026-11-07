@@ -3,6 +3,7 @@
 //! Shares `PlayerSearchState` directly. The caller snapshots before opening and
 //! restores the complete state on `ModalResult::Cancel`.
 
+use crate::i18n::UiTr;
 use eframe::egui;
 
 use super::player_search::{POSITION_OFFSETS, PlayerSearchState};
@@ -25,7 +26,7 @@ pub fn show(ctx: &egui::Context, state: &mut PlayerSearchState, open: &mut bool)
     // Leave room for the title, window margins, validation and footer even on
     // short viewports. Content, rather than the whole window, scrolls.
     let content_height = (available.y - 150.0).clamp(40.0, 480.0);
-    egui::Window::new("Advanced Search")
+    egui::Window::new(crate::i18n::tr(ctx, "Advanced Search"))
         .open(open)
         .resizable(true)
         .collapsible(false)
@@ -52,7 +53,10 @@ pub fn show(ctx: &egui::Context, state: &mut PlayerSearchState, open: &mut bool)
                     result = ModalResult::Cancel;
                 }
                 if ui
-                    .add_enabled(state.validation_error().is_none(), egui::Button::new("OK"))
+                    .add_enabled(
+                        state.validation_error().is_none(),
+                        egui::Button::new(ui.tr("OK")),
+                    )
                     .clicked()
                 {
                     result = ModalResult::Ok;
@@ -68,7 +72,7 @@ pub fn show(ctx: &egui::Context, state: &mut PlayerSearchState, open: &mut bool)
 fn show_general_tab(ui: &mut egui::Ui, state: &mut PlayerSearchState) {
     // Stack sections so resizing never strands controls beyond the right edge.
     ui.horizontal_wrapped(|ui| {
-        ui.label("Club ID:");
+        ui.label(ui.tr("Club ID:"));
         ui.add_enabled(
             !state.my_clubs,
             egui::TextEdit::singleline(&mut state.club_id)
@@ -80,7 +84,7 @@ fn show_general_tab(ui: &mut egui::Ui, state: &mut PlayerSearchState) {
         );
     });
     ui.separator();
-    section_title(ui, "Inclusive ranges");
+    section_title(ui, &ui.tr("Inclusive ranges"));
     for (label, min, max) in [
         ("Age", &mut state.age_min, &mut state.age_max),
         ("CA", &mut state.ca_min, &mut state.ca_max),
@@ -102,7 +106,7 @@ fn show_general_tab(ui: &mut egui::Ui, state: &mut PlayerSearchState) {
         });
     }
     ui.separator();
-    ui.label(egui::RichText::new("Positions").small().strong())
+    ui.label(egui::RichText::new(ui.tr("Positions")).small().strong())
         .on_hover_text("Any selected position (OR). Minimum familiarity: 1–20.\n1 = None · 20 = Natural. Default minimum: 2.");
     ui.add_space(2.0);
     for (bit, &(_, label)) in POSITION_OFFSETS.iter().enumerate() {

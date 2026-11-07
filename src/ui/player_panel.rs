@@ -113,7 +113,7 @@ fn show_overview(
     let id = potential_attributes_id(player, addr);
     let mut preview = ui.data_mut(|data| data.get_temp::<bool>(id).unwrap_or(false));
     if ui
-        .checkbox(&mut preview, "Show potential attributes")
+        .checkbox(&mut preview, &ui.tr("Show potential attributes"))
         .on_hover_text("Estimated attributes at PA; read-only, not a growth guarantee.")
         .changed()
     {
@@ -342,7 +342,7 @@ fn show_personal_details(
 
     // Ability
     ui.vertical(|ui| {
-        ui.strong("Ability");
+        ui.strong(ui.tr("Ability"));
         edits.extend(field_widget::ca_pa_edit(
             ui,
             &mut player.raw,
@@ -354,7 +354,7 @@ fn show_personal_details(
 
     // Stats
     ui.vertical(|ui| {
-        ui.strong("Stats");
+        ui.strong(ui.tr("Stats"));
         // Each row shows only when the record's schema maps the field.
         if let Some(apps) = player.field_u16("p_senior_apps") {
             field_widget::info_label(ui, "Snr Apps", apps);
@@ -524,7 +524,7 @@ fn show_traits(
     addr: u64,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong("Traits");
+    ui.strong(ui.tr("Traits"));
     show_traits_checkboxes(schemas, ui, player, addr, edits);
 }
 
@@ -642,7 +642,7 @@ fn show_traits_checkboxes(
 ) {
     let location = schemas.field("p_traits").and_then(|field| field.offset);
     let Some((_, old_mask)) = trait_value(&player.raw, location) else {
-        ui.label("Traits unavailable for this record or game version.");
+        ui.label(ui.tr("Traits unavailable for this record or game version."));
         return;
     };
     let mut new_mask = old_mask;
@@ -736,14 +736,14 @@ fn trait_names(mask: u64) -> String {
 
 fn render_trait_column(ui: &mut egui::Ui, groups: &[(&str, &[u8])], mask: &mut u64) {
     for (heading, ppm_ids) in groups {
-        ui.strong(*heading);
+        ui.strong(ui.tr(heading));
         for &id in *ppm_ids {
             let bit = 1u64 << (id - 1);
             let mut checked = (*mask & bit) != 0;
             if ui
                 .add_enabled(
                     crate::ui::navigation::editing_enabled(ui),
-                    egui::Checkbox::new(&mut checked, player::ppm_name(id)),
+                    egui::Checkbox::new(&mut checked, ui.tr(player::ppm_name(id))),
                 )
                 .changed()
             {
@@ -768,7 +768,7 @@ fn show_contract(
     player: &mut PlayerRecord,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong("Current contract");
+    ui.strong(ui.tr("Current contract"));
     if player.build.version() == crate::game_version::GameVersion::Fm27 {
         show_unverified_contract_type(ui);
     }
@@ -886,7 +886,7 @@ fn show_player_status(
     if layout.is_none() && morale.is_none() {
         return;
     }
-    ui.strong("Status");
+    ui.strong(ui.tr("Status"));
     if let Some(field) = morale {
         if let Some(location) = field.offset.as_ref() {
             if let Some(&raw) = player.raw.get(location.offset() as usize) {
