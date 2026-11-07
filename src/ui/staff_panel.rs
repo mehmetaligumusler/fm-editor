@@ -187,7 +187,7 @@ fn roles(
     if let Some(roles) = &staff.roles {
         field_widget::roles_column(schemas, ui, "Roles (read-only)", roles, skip_zeros);
     } else {
-        ui.strong("Roles (read-only)");
+        ui.strong(ui.tr("Roles (read-only)"));
         ui.label("No role sub-record.");
     }
 }
