@@ -487,15 +487,14 @@ fn u32_drag(
                     .range(0i64..=4_294_967_295i64)
                     .speed(1.0);
                 let drag = if verified {
-                    drag.custom_formatter(crate::i18n::money_drag_formatter(
-                        factor,
-                        &format!(" {}", cur.symbol()),
-                    ))
-                    .custom_parser(crate::i18n::money_drag_parser(factor))
+                    drag.custom_formatter(crate::i18n::money_drag_formatter(factor))
+                        .custom_parser(crate::i18n::money_drag_parser(factor))
                 } else {
                     drag
                 };
-                ui.add_sized([100.0, 22.0], drag).changed()
+                let changed = ui.add_sized([100.0, 22.0], drag).changed();
+                ui.weak(format!(" {}", cur.symbol()));
+                changed
             })
             .inner;
     });
@@ -560,20 +559,20 @@ fn f32_drag(
         ui.label(label);
         changed = ui
             .add_enabled_ui(enabled, |ui| {
-                ui.add_sized(
-                    [100.0, 22.0],
-                    egui::DragValue::new(&mut val)
-                        .update_while_editing(false)
-                        .range(0.0f32..=100_000.0f32)
-                        .clamp_existing_to_range(false)
-                        .speed(0.5)
-                        .custom_formatter(crate::i18n::money_drag_formatter(
-                            factor,
-                            &format!(" {}", cur.symbol()),
-                        ))
-                        .custom_parser(crate::i18n::money_drag_parser(factor)),
-                )
-                .changed()
+                let changed = ui
+                    .add_sized(
+                        [100.0, 22.0],
+                        egui::DragValue::new(&mut val)
+                            .update_while_editing(false)
+                            .range(0.0f32..=100_000.0f32)
+                            .clamp_existing_to_range(false)
+                            .speed(0.5)
+                            .custom_formatter(crate::i18n::money_drag_formatter(factor))
+                            .custom_parser(crate::i18n::money_drag_parser(factor)),
+                    )
+                    .changed();
+                ui.weak(format!(" {}", cur.symbol()));
+                changed
             })
             .inner;
     });

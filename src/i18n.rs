@@ -69,14 +69,15 @@ pub fn format_money(gbp: u64, cur: crate::settings::Currency) -> String {
 }
 
 /// DragValue display formatter for money drags: internal GBP → display value.
+/// Bare thousands-formatted display for money drags. The currency symbol
+/// and wage-period suffix are rendered as separate labels next to the drag
+/// so they never end up inside the edit box.
 pub fn money_drag_formatter(
     factor: f64,
-    suffix: &str,
 ) -> impl Fn(f64, std::ops::RangeInclusive<usize>) -> String + 'static {
-    let suffix = suffix.to_owned();
     move |v, _| {
         let shown = ((v * factor).round() as i64).max(0) as u64;
-        format!("{}{}", thousands(shown), suffix)
+        thousands(shown)
     }
 }
 
@@ -901,10 +902,10 @@ mod tests {
 
     #[test]
     fn money_drag_round_trips_through_the_currency_factor() {
-        let fmt = money_drag_formatter(1.166_228_8, " €");
+        let fmt = money_drag_formatter(1.166_228_8);
         let parse = money_drag_parser(1.166_228_8);
         let shown = fmt(4_100_645.0, 0..=usize::MAX);
-        assert_eq!(shown, "4,782,290 €");
+        assert_eq!(shown, "4,782,290");
         let back = parse(&shown).unwrap();
         assert!((back - 4_100_645.0).abs() < 0.51);
         let internal = 1_234_567.0;

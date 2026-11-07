@@ -505,7 +505,18 @@ pub fn raw_u32_edit(
     let mut changed = false;
     let cur = crate::i18n::currency(ui.ctx());
     let money = is_money_label(label);
-    let factor = if money { cur.factor() } else { 1.0 };
+    // Wages convert to the selected period (×52 yearly, ×4.333 monthly);
+    // other money converts to the selected currency only.
+    let period_factor = if money && is_wage_label(label) {
+        crate::i18n::wage_period(ui.ctx()).factor()
+    } else {
+        1.0
+    };
+    let factor = if money {
+        cur.factor() * period_factor
+    } else {
+        1.0
+    };
     let suffix = if money {
         let period = if is_wage_label(label) {
             crate::i18n::wage_suffix(
@@ -528,10 +539,13 @@ pub fn raw_u32_edit(
             .speed(100.0);
         if money {
             drag = drag
-                .custom_formatter(crate::i18n::money_drag_formatter(factor, &suffix))
+                .custom_formatter(crate::i18n::money_drag_formatter(factor))
                 .custom_parser(crate::i18n::money_drag_parser(factor));
         }
         changed = number_edit(ui, drag, 90.0);
+        if money {
+            ui.weak(&suffix);
+        }
     });
 
     if changed {
