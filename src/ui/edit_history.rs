@@ -366,9 +366,10 @@ fn navigation_reason<'a>(
     report: &ActionReport,
     context: &HistoryUiContext<'a>,
 ) -> Option<&'static str> {
-    if report.session_id != context.current_session || report.session_closed.is_some() {
-        Some("Session closed: this record is audit-only; profiles cannot be opened.")
-    } else if !context.navigation_enabled {
+    // Profiles open from any session as long as the game is connected and
+    // the entity identity is valid — the address is looked up live by UID,
+    // so a stale address from a previous session doesn't matter.
+    if !context.navigation_enabled {
         Some("Profile navigation is unavailable while disconnected or loading.")
     } else if report.entity.uid.is_none_or(|uid| uid == 0)
         || report.entity.address <= 0x10000
@@ -741,13 +742,18 @@ mod tests {
         let mut report = fixture(ActionStatus::Undone);
         report.session_id = 1;
         assert!(!history.matches(&report, &context()));
-        assert!(navigation_reason(&report, &context()).is_some());
+        // Navigation is no longer blocked by session boundaries.
+        assert!(navigation_reason(&report, &context()).is_none());
         history.include_closed_sessions = true;
         assert!(history.matches(&report, &context()));
         report.session_id = 2;
         report.session_closed = Some("Save replaced".into());
         assert!(history.matches(&report, &context()));
+        // ... but an invalid entity still cannot open a profile.
+        report.entity.uid = None;
         assert!(navigation_reason(&report, &context()).is_some());
+        report.entity.uid = Some(42);
+        assert!(navigation_reason(&report, &context()).is_none());
         history.include_closed_sessions = false;
         assert!(!history.matches(&report, &context()));
     }
@@ -898,8 +904,13 @@ mod tests {
                 1 => report.entity.uid = Some(0),
                 2 => report.entity.address = 0x10000,
                 3 => report.entity.address = 0x7FFF_FFFF_FFFF,
-                4 => report.session_closed = Some("Disconnected".into()),
-                _ => report.session_id = 1,
+                // session_closed no longer blocks navigation; use invalid addr
+                4 => report.entity.address = 0,
+                _ => {
+                    // session boundaries no longer disable navigation;
+                    // use an invalid address instead
+                    report.entity.address = 0;
+                }
             }
             assert!(click(&mut history, &ctx, &[report], context, "Open profile").is_none());
             assert!(
