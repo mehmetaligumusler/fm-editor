@@ -7,7 +7,7 @@
 //! in an `Arc`; the worker sends `CacheReady(arc)`.
 
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 
 use crate::cache::{CachedClub, CachedPlayer, CachedStaff, EntityCache};
 use crate::process::FmProcess;
@@ -88,6 +88,10 @@ pub(super) fn load_entity_cache(
     // Optional: a schema may leave the role-ratings pointer unmapped.
     let s_role_ptr_off = schemas.offset_of("s_role_ptr");
 
+    // Optional: active-injury reading (the pointer already sits inside the
+    // player struct bytes, so healthy players cost no extra reads).
+    let injury_layout = schemas.injury_layout;
+
     // Club offsets
     let c_uid_off = schemas
         .field("c_uid")
@@ -113,6 +117,7 @@ pub(super) fn load_entity_cache(
     // ------------------------------------------------------------------
     // Phase 1 — players
     // ------------------------------------------------------------------
+    let mut injury_index = std::collections::HashMap::new();
     let mut players = Vec::with_capacity(ac.humans_count);
 
     for i in 0..ac.humans_count {
@@ -136,6 +141,13 @@ pub(super) fn load_entity_cache(
         let dob_year = read_u16_le(&raw, p_dob_year_off as usize);
 
         let name = crate::player::read_player_name(fm, &raw).unwrap_or_default();
+
+        let injuries = (injury_layout)
+            .map(|layout| crate::injury::read_injuries(fm, &raw, layout))
+            .unwrap_or_default();
+        if !injuries.is_empty() {
+            injury_index.insert(i, injuries);
+        }
 
         players.push(CachedPlayer {
             owning_club_id: None,
@@ -248,7 +260,11 @@ pub(super) fn load_entity_cache(
         let full_ptr = fm.read_u64(ptr + c_full_name_off).unwrap_or(0);
         let short_name = fm.read_fm_name(short_ptr).unwrap_or_default();
         let full_name = fm.read_fm_name(full_ptr).unwrap_or_default();
-        let name = if short_name.is_empty() { full_name.clone() } else { short_name };
+        let name = if short_name.is_empty() {
+            full_name.clone()
+        } else {
+            short_name
+        };
 
         // A club with neither name is not a real club: FM27 keeps three
         // nameless placeholder objects of their own class (UIDs 2000000000,
@@ -318,6 +334,7 @@ pub(super) fn load_entity_cache(
         clubs,
         club_names,
         my_clubs,
+        injuries: injury_index,
     }))
 }
 
@@ -487,14 +504,18 @@ mod membership_tests {
                 collect_club_group(0x20000, &clubs, 8, 16, 32, |a| mem.get(&a).copied()).is_none()
             );
         }
-        assert!(collect_club_group(0x10000, &clubs, 8, 16, 32, |_| panic!(
-            "invalid pointer read"
-        ))
-        .is_none());
+        assert!(
+            collect_club_group(0x10000, &clubs, 8, 16, 32, |_| panic!(
+                "invalid pointer read"
+            ))
+            .is_none()
+        );
         let edge = 0x7FFFFFFFFFF0;
-        assert!(collect_club_group(edge, &[club(edge, 44)], 8, 16, 32, |_| {
-            panic!("pointer read crosses valid address range")
-        })
-        .is_none());
+        assert!(
+            collect_club_group(edge, &[club(edge, 44)], 8, 16, 32, |_| {
+                panic!("pointer read crosses valid address range")
+            })
+            .is_none()
+        );
     }
 }

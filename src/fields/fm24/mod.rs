@@ -46,6 +46,7 @@ pub static FM24: VersionedSchemas = VersionedSchemas {
     club_sub_records: CLUB_SUB_RECORDS,
     stadium_sub_records: &[],
     player_lists: None,
+    injury_layout: None,
     morale_labels: player::MORALE_LABELS,
     person_profile: None,
 
@@ -83,6 +84,16 @@ pub static FM24: VersionedSchemas = VersionedSchemas {
     age_reference_year: 2023,
 };
 
+pub(crate) static INJURY_LAYOUT: crate::injury::InjuryLayout = crate::injury::InjuryLayout {
+    conditions_ptr: 0xF8,
+    injuries_vec: 0x0,
+    type_ptr: 0x8,
+    type_name: 0x20,
+    start: 0x20,
+    full_days: 0x28,
+    light_days: 0x2A,
+};
+
 /// Epic Windows read-only candidate layout. Array roots were observed live;
 /// inherited field offsets are research leads, not verified editing support.
 /// See docs/fm24/epic-preview.md. Never remove the build-level write lock
@@ -100,6 +111,9 @@ pub static FM24_EPIC: VersionedSchemas = VersionedSchemas {
     player_lists: None,
     morale_labels: player::MORALE_LABELS,
     person_profile: None,
+    // Witnessed live 2026-11-08 (Livan Burcu, ankle fracture, type id 15):
+    // conditions chain + record offsets identical to the FM27 layout.
+    injury_layout: Some(&INJURY_LAYOUT),
 
     player_struct_size: 0x3E8, // pool stride
     staff_struct_size: 0x268,  // pool stride

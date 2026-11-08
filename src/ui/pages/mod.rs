@@ -12,5 +12,6 @@
 pub mod advanced_search_modal;
 pub mod best_xi;
 pub mod club_search;
+pub mod injured_players;
 pub mod player_search;
 pub mod staff_search;

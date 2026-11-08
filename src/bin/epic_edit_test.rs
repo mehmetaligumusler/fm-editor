@@ -70,7 +70,10 @@ fn find_cmd(args: &[String]) -> Result<(), String> {
         .iter()
         .filter(|p| p.name.to_lowercase().contains(&needle) && !p.name.is_empty())
         .take(10)
-        .map(|p| serde_json::json!({"uid": p.uid, "name": p.name, "dob_year": p.dob_year}))
+        .map(|p| {
+            serde_json::json!({"uid": p.uid, "name": p.name, "dob_year": p.dob_year,
+                "addr": format!("0x{:X}", p.addr)})
+        })
         .collect();
     let clubs: Vec<_> = cache
         .clubs

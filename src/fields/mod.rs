@@ -607,7 +607,11 @@ fn label_or_code(table: &[(u8, &'static str)], code: u8, prefix: &str) -> String
         .find(|&&(known, _)| known == code)
         .map(|&(_, label)| label.to_owned())
         .unwrap_or_else(|| {
-            if prefix.ends_with('#') { format!("{prefix}{code}") } else { format!("{prefix} {code}") }
+            if prefix.ends_with('#') {
+                format!("{prefix}{code}")
+            } else {
+                format!("{prefix} {code}")
+            }
         })
 }
 
@@ -636,6 +640,8 @@ pub struct VersionedSchemas {
 
     /// None when this build's player lists have not been mapped.
     pub player_lists: Option<&'static PlayerListLayout>,
+    /// None when this build's active-injury chain has not been mapped.
+    pub injury_layout: Option<&'static crate::injury::InjuryLayout>,
     /// Only independently witnessed morale levels have labels.
     pub morale_labels: &'static [(u8, &'static str)],
     /// None when this build's person-profile data (languages, licence,
@@ -829,10 +835,12 @@ mod schema_lookup_tests {
                 Some(scanned.offset.unwrap().offset() as usize)
             );
         }
-        assert!(GameBuild::Fm26Steam
-            .schemas()
-            .field("no_such_key")
-            .is_none());
+        assert!(
+            GameBuild::Fm26Steam
+                .schemas()
+                .field("no_such_key")
+                .is_none()
+        );
     }
 
     #[test]

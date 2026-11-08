@@ -374,6 +374,7 @@ mod tests {
                     club_ids: Default::default(),
                     label: "Test club".into(),
                 }),
+                injuries: Default::default(),
                 players: vec![],
                 staff: vec![],
                 clubs: vec![],
@@ -403,6 +404,7 @@ mod tests {
         let ctx = egui::Context::default();
         let cache = Arc::new(EntityCache {
             my_clubs: None,
+            injuries: Default::default(),
             players: vec![],
             staff: vec![],
             clubs: vec![],
@@ -445,6 +447,7 @@ mod tests {
     fn pitch_reserves_full_height_and_keeps_cards_separate_for_all_formations() {
         let cache = EntityCache {
             my_clubs: None,
+            injuries: Default::default(),
             players: vec![],
             staff: vec![],
             clubs: vec![],
@@ -550,6 +553,7 @@ mod tests {
         let name = "A very long footballer name that must not overflow adjacent positions";
         let cache = EntityCache {
             my_clubs: None,
+            injuries: Default::default(),
             players: vec![crate::cache::CachedPlayer {
                 addr: 0x20000,
                 index: 7,
@@ -658,6 +662,7 @@ mod tests {
                 club_ids: Default::default(),
                 label: "Test club".into(),
             }),
+            injuries: Default::default(),
             players: vec![],
             staff: vec![],
             clubs: vec![],

@@ -35,6 +35,7 @@ pub enum Page {
     PlayerSearch,
     StaffSearch,
     ClubSearch,
+    InjuredPlayers,
     HumanManager,
 }
 
@@ -185,6 +186,7 @@ pub struct FmEditorApp {
     // Audit reports and current-session chronological Undo authority.
     change_history: ChangeHistory,
     history_ui: crate::ui::edit_history::HistoryUi,
+    injured_state: pages::injured_players::InjuredPlayersState,
     write_error: Option<String>,
     policy_ui: crate::ui::club_policy::PolicyUi,
 
@@ -252,6 +254,7 @@ impl FmEditorApp {
             manager_loading: false,
             change_history: ChangeHistory::load(&history_path()),
             history_ui: Default::default(),
+            injured_state: Default::default(),
             write_error: None,
             policy_ui: Default::default(),
             status_msg: None,
@@ -941,6 +944,7 @@ impl eframe::App for FmEditorApp {
         let mut nav_reload_clicked = false;
         let mut nav_page_clicked = false;
         let mut reload_save_clicked = false;
+        let mut injury_heals: Vec<pages::injured_players::HealRequest> = Vec::new();
 
         // ===== Menu bar =====
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
@@ -1187,6 +1191,7 @@ impl eframe::App for FmEditorApp {
                     (Page::PlayerSearch, "Players"),
                     (Page::StaffSearch, "Staff"),
                     (Page::ClubSearch, "Clubs"),
+                    (Page::InjuredPlayers, "Injured players"),
                 ] {
                     let selected = self.active_page == page;
                     if ui
@@ -1435,13 +1440,22 @@ impl eframe::App for FmEditorApp {
                 return;
             };
             match self.active_page {
+                Page::InjuredPlayers => {
+                    injury_heals = pages::injured_players::show(
+                        ui,
+                        cache_arc.as_deref(),
+                        self.attached_build.unwrap_or(GameBuild::Fm24Epic),
+                        schemas.injury_layout,
+                        &mut self.injured_state,
+                    );
+                }
                 Page::BestXi => {
                     clicked_xi_player = pages::best_xi::show(
                         ui, &mut self.best_xi, schemas, cache_arc.as_ref(),
                     );
                 }
                 // ---- Search pages: filter row always visible, results area swaps ----
-                Page::PlayerSearch | Page::StaffSearch | Page::ClubSearch => {
+                Page::PlayerSearch | Page::StaffSearch | Page::ClubSearch | Page::InjuredPlayers => {
                     // Filter row — always rendered, live filtering each frame.
                     match self.active_page {
                         Page::PlayerSearch => {
@@ -1457,6 +1471,7 @@ impl eframe::App for FmEditorApp {
                         }
                         Page::StaffSearch  => pages::staff_search::filter_row(ui, &mut self.staff_search),
                         Page::ClubSearch   => pages::club_search::filter_row(ui, &mut self.club_search),
+                        Page::InjuredPlayers => {}
                         Page::HumanManager | Page::BestXi => unreachable!(),
                     }
 
@@ -1473,7 +1488,9 @@ impl eframe::App for FmEditorApp {
                         Page::PlayerSearch => format!("{} ({})", ui.tr("Results"), player_filtered.len()),
                         Page::StaffSearch  => format!("{} ({})", ui.tr("Results"), staff_filtered.len()),
                         Page::ClubSearch   => format!("{} ({})", ui.tr("Results"), club_filtered.len()),
-                        Page::HumanManager | Page::BestXi => "Results".to_string(),
+                        Page::HumanManager | Page::BestXi | Page::InjuredPlayers => {
+                            "Results".to_string()
+                        }
                     };
                     let mut close_idx: Option<usize> = None;
                     let mut results_badge_clicked = false;
@@ -1628,6 +1645,7 @@ impl eframe::App for FmEditorApp {
                         }
                     } else {
                         match self.active_page {
+                            Page::InjuredPlayers => {}
                             Page::PlayerSearch => {
                                 clicked_player = pages::player_search::results_grid(
                                     schemas,
@@ -1855,6 +1873,15 @@ impl eframe::App for FmEditorApp {
         }
         // The audit trail persists across editor restarts.
         self.change_history.save_if_dirty(&history_path());
+        for (entity, heal) in injury_heals {
+            if self.editing_allowed() && !self.change_history.is_pending() {
+                if let Some(draft) = history_actions(vec![heal]).into_iter().next() {
+                    for cmd in self.change_history.submit(entity, vec![draft]) {
+                        self.bridge.send(cmd);
+                    }
+                }
+            }
+        }
         if !edits.is_empty() {
             let actions = history_actions(edits);
             if self.editing_allowed() && !self.change_history.is_pending() && edit_entity.is_some()
@@ -2836,6 +2863,7 @@ mod edit_history_integration_tests {
             players: vec![],
             staff: vec![],
             my_clubs: None,
+            injuries: Default::default(),
             clubs: vec![CachedClub {
                 addr: 0x20000,
                 index: 7,

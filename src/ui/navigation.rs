@@ -141,6 +141,7 @@ mod tests {
     fn cache(names: &[&str]) -> EntityCache {
         EntityCache {
             my_clubs: None,
+            injuries: Default::default(),
             players: vec![],
             staff: vec![],
             clubs: names

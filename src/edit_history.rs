@@ -352,12 +352,10 @@ impl ChangeHistory {
         if pid == 0 {
             return;
         }
-        // Legacy entries saved before PID tracking (pid == 0) also revive:
-        // the CAS guard on every write is the real safety net, not the PID.
         let ids: Vec<ActionId> = self
             .reports
             .iter()
-            .filter(|r| (r.pid == pid || r.pid == 0) && r.session_closed.is_none())
+            .filter(|r| r.pid == pid && r.session_closed.is_none())
             .map(|r| r.id)
             .collect();
         for id in ids {

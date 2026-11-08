@@ -31,6 +31,13 @@ impl GameDate {
     }
 }
 
+/// (day, month, year) from a packed DateDayYear pair with flag bits.
+pub fn dmy_from_packed(doy_flags: u16, year: u16) -> Option<(u16, u8, u16)> {
+    let date = GameDate::from_encoded(doy_flags, year)?;
+    let (month, day) = month_day(date.day, date.year)?;
+    Some((day as u16, month, date.year))
+}
+
 fn month_day(day: u16, year: u16) -> Option<(u8, u16)> {
     let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
     let months = [
