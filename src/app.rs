@@ -1934,12 +1934,10 @@ impl eframe::App for FmEditorApp {
         }
         // The audit trail persists across editor restarts.
         self.change_history.save_if_dirty(&history_path());
-        for (entity, heal) in injury_heals {
+        for (entity, draft) in injury_heals {
             if self.editing_allowed() && !self.change_history.is_pending() {
-                if let Some(draft) = history_actions(vec![heal]).into_iter().next() {
-                    for cmd in self.change_history.submit(entity, vec![draft]) {
-                        self.bridge.send(cmd);
-                    }
+                for cmd in self.change_history.submit(entity, vec![draft]) {
+                    self.bridge.send(cmd);
                 }
             }
         }

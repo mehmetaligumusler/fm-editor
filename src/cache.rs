@@ -20,6 +20,13 @@ use std::collections::HashMap;
 pub struct InjuryInfo {
     /// Address of the injury record (day counts live at `full_days`).
     pub record_addr: u64,
+    /// Address of the conditions object holding the injury + absence
+    /// vectors (healing clears both).
+    pub conditions_addr: u64,
+    /// Raw [begin][end] of the injuries vector at capture time (16 bytes).
+    pub injuries_vec_raw: Vec<u8>,
+    /// Raw [begin][end] of the absences vector at capture time (16 bytes).
+    pub absences_vec_raw: Vec<u8>,
     /// Descriptive injury-type name, e.g. "ayak bileğinde kırık".
     pub name: String,
     /// Packed start date: day-of-year (flag bits above 0x1FF) and year.

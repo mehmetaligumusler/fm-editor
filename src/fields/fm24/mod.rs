@@ -87,6 +87,7 @@ pub static FM24: VersionedSchemas = VersionedSchemas {
 pub(crate) static INJURY_LAYOUT: crate::injury::InjuryLayout = crate::injury::InjuryLayout {
     conditions_ptr: 0xF8,
     injuries_vec: 0x0,
+    absences_vec: 0x70,
     type_ptr: 0x8,
     type_name: 0x20,
     start: 0x20,

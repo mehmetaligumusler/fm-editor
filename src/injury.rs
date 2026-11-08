@@ -1,5 +1,10 @@
 //! Active-injury reading for FM24 Epic (player medical conditions).
 //!
+//! Healing clears BOTH vectors of the conditions object — the injury
+//! record AND the absence entry ("player is out") that squad screens
+//! check. Zeroing only the injury's day counts leaves the absence active
+//! and the game keeps the player marked injured (observed live).
+//!
 //! Layout witnessed live on 2026-11-08 against Livan Burcu's recorded
 //! ankle fracture ("ayak bile\u{11f}inde k\u{131}r\u{131}k", injury type id 15,
 //! start 17 Sep 2026 = doy 260, 75 full + 52 light days): the player
@@ -18,6 +23,10 @@ pub struct InjuryLayout {
     pub conditions_ptr: u64,
     /// Conditions-object offset of the vector of injury-record pointers.
     pub injuries_vec: u64,
+    /// Conditions-object offset of the absence vector ("player is out"
+    /// entries — what squad screens check). Clearing the injury record
+    /// alone is NOT enough: this entry keeps the player marked injured.
+    pub absences_vec: u64,
     /// Injury-record offset of the pointer to the injury-type object.
     pub type_ptr: u64,
     /// Injury-type-object offset of the FmString with the descriptive name.
@@ -31,6 +40,12 @@ pub struct InjuryLayout {
 
 fn valid(p: u64) -> bool {
     (0x10000..0x7FFF_FFFF_FFFF).contains(&p)
+}
+
+/// Read the raw 16-byte [begin][end] pair of a pointer vector.
+fn read_vec_raw(fm: &FmProcess, addr: u64) -> Option<Vec<u8>> {
+    let bytes = fm.read_bytes(addr, 16).ok()?;
+    Some(bytes)
 }
 
 /// Parse the witnessed record head into its date and day fields.
@@ -87,11 +102,14 @@ pub fn read_injuries(fm: &FmProcess, raw: &[u8], layout: &InjuryLayout) -> Vec<I
         let name = read_type_name(fm, type_ptr, layout);
         out.push(InjuryInfo {
             record_addr: rec,
+            conditions_addr: cond,
             name,
             start_doy: start.0,
             start_year: start.1,
             full_days,
             light_days,
+            injuries_vec_raw: read_vec_raw(fm, cond + layout.injuries_vec).unwrap_or_default(),
+            absences_vec_raw: read_vec_raw(fm, cond + layout.absences_vec).unwrap_or_default(),
         });
     }
     out
@@ -134,6 +152,7 @@ mod tests {
     const LAYOUT: InjuryLayout = InjuryLayout {
         conditions_ptr: 0xF8,
         injuries_vec: 0x0,
+        absences_vec: 0x70,
         type_ptr: 0x8,
         type_name: 0x20,
         start: 0x20,

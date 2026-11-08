@@ -4,7 +4,7 @@
 use std::time::SystemTime;
 
 use crate::game_version::GameBuild;
-use crate::undo::UndoEntry;
+pub use crate::undo::UndoEntry;
 
 pub type ActionId = u64;
 pub type SessionId = u64;
