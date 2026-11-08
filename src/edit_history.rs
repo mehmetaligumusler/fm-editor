@@ -352,12 +352,13 @@ impl ChangeHistory {
         if pid == 0 {
             return;
         }
-        // Legacy entries saved before PID tracking (pid == 0) also revive:
-        // the CAS guard on every write is the real safety net, not the PID.
+        // Revive every report that has a stored undo payload — the CAS
+        // guard on every write is the real safety net, not the PID or the
+        // session state. If the game's memory changed, undo is refused.
         let ids: Vec<ActionId> = self
             .reports
             .iter()
-            .filter(|r| (r.pid == pid || r.pid == 0) && r.session_closed.is_none())
+            .filter(|r| r.pid == pid || r.pid == 0)
             .map(|r| r.id)
             .collect();
         for id in ids {
@@ -387,6 +388,7 @@ impl ChangeHistory {
             if has_any {
                 if let Some(report) = self.reports.iter_mut().find(|r| r.id == id) {
                     report.session_id = self.session;
+                    report.session_closed = None;
                     report.undo_unavailable_reason = None;
                 }
             }
@@ -575,9 +577,10 @@ impl ChangeHistory {
     }
 
     fn eligible(&self, report: &ActionReport) -> bool {
-        report.session_id == self.session
-            && report.session_closed.is_none()
-            && !self.pending.values().any(|&(id, _, _)| id == report.id)
+        // CAS (compare-and-swap) on every undo write is the real safety
+        // net: if the game's memory no longer matches what we wrote, the
+        // undo is refused. Session tracking is unnecessary on top of it.
+        !self.pending.values().any(|&(id, _, _)| id == report.id)
             && self.payloads.keys().any(|&(id, _)| id == report.id)
     }
 
@@ -595,7 +598,7 @@ impl ChangeHistory {
         if self.is_pending() {
             Some("Waiting for write acknowledgements".into())
         } else if self.latest().is_none() {
-            Some("No confirmed changes available to undo in this session".into())
+            Some("No stored undo payloads available".into())
         } else {
             None
         }
