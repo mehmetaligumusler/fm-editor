@@ -62,6 +62,7 @@ fn numeric(bytes: &[u8]) -> i64 {
 pub fn build_overlay(
     reports: &[ActionReport],
     current: Option<(EntityKind, u32)>,
+    current_save: Option<&str>,
 ) -> HashMap<u64, OverlayEntry> {
     let mut ordered: Vec<&ActionReport> = reports
         .iter()
@@ -70,6 +71,14 @@ pub fn build_overlay(
                 kind == *report_kind && r.entity.uid.is_some_and(|u| u == uid)
             }
             (None, _) => false,
+        })
+        // Save separation: edits made on another save never enter this
+        // save's badges. Legacy entries (None, saved before save tracking)
+        // stay visible so existing history keeps its badges.
+        .filter(|r| match (&r.save_name, current_save) {
+            (Some(saved), Some(active)) => saved == active,
+            (None, _) => true,
+            (Some(_), None) => true,
         })
         .collect();
     ordered.sort_by_key(|r| r.id);
@@ -194,6 +203,7 @@ mod tests {
             id,
             session_id: 1,
             pid: 0,
+            save_name: None,
             entity: entity(),
             label: "test".into(),
             before: String::new(),
@@ -214,7 +224,7 @@ mod tests {
             report(1, ActionStatus::Applied, vec![change(0x1000, 8, 10)]),
             report(2, ActionStatus::Applied, vec![change(0x1000, 10, 14)]),
         ];
-        let map = build_overlay(&reports, VIEWING);
+        let map = build_overlay(&reports, VIEWING, None);
         let e = map.get(&0x1000).unwrap();
         assert_eq!(e.baseline, vec![8]);
         assert_eq!(e.current, vec![14]);
@@ -229,7 +239,7 @@ mod tests {
             report(1, ActionStatus::Undone, vec![change(0x1000, 8, 14)]),
             report(2, ActionStatus::Applied, vec![change(0x1000, 8, 10)]),
         ];
-        let map = build_overlay(&reports, VIEWING);
+        let map = build_overlay(&reports, VIEWING, None);
         let e = map.get(&0x1000).unwrap();
         assert_eq!(e.delta, 2);
         assert_eq!(e.baseline, vec![8]);
@@ -247,7 +257,7 @@ mod tests {
             ActionStatus::Applied,
             vec![change(0x1000, 6, 3), big],
         )];
-        let map = build_overlay(&reports, VIEWING);
+        let map = build_overlay(&reports, VIEWING, None);
         assert_eq!(map.get(&0x1000).unwrap().delta, -3);
         let wide = map.get(&0x2000).unwrap();
         assert_eq!(wide.width, 4);
@@ -259,7 +269,7 @@ mod tests {
         let mut refused = change(0x1000, 8, 20);
         refused.attempts[0].outcome = AttemptOutcome::Refused;
         let reports = vec![report(1, ActionStatus::Refused, vec![refused])];
-        assert!(build_overlay(&reports, VIEWING).is_empty());
+        assert!(build_overlay(&reports, VIEWING, None).is_empty());
     }
 
     #[test]
@@ -270,7 +280,7 @@ mod tests {
         let mut r = report(1, ActionStatus::Applied, vec![change(0x4000, 8, 20)]);
         r.entity = other;
         // Viewing player uid 7: uid-99 edits must not appear.
-        assert!(build_overlay(&[r], VIEWING).is_empty());
+        assert!(build_overlay(&[r], VIEWING, None).is_empty());
     }
 
     #[test]
@@ -279,6 +289,6 @@ mod tests {
             report(1, ActionStatus::Applied, vec![change(0x1000, 8, 14)]),
             report(2, ActionStatus::Applied, vec![change(0x1000, 14, 8)]),
         ];
-        assert!(build_overlay(&reports, VIEWING).is_empty());
+        assert!(build_overlay(&reports, VIEWING, None).is_empty());
     }
 }

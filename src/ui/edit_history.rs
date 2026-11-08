@@ -12,6 +12,8 @@ pub struct HistoryUi {
     pub open: bool,
     search: String,
     status: StatusFilter,
+    /// "All saves" (None) or a specific save name.
+    save_filter: Option<String>,
     current_entity_only: bool,
     /// On by default: the persisted audit trail is the point of the file,
     // so previous sessions stay visible until the user narrows the view.
@@ -28,6 +30,7 @@ impl Default for HistoryUi {
             open: false,
             search: String::new(),
             status: StatusFilter::default(),
+            save_filter: None,
             current_entity_only: false,
             include_closed_sessions: true,
             #[cfg(test)]
@@ -41,6 +44,8 @@ impl Default for HistoryUi {
 #[derive(Clone)]
 pub struct HistoryUiContext<'a> {
     pub current_session: SessionId,
+    /// The connected game's loaded save name (None when unknown).
+    pub current_save: Option<&'a str>,
     /// Actions that can be undone right now (live session, payload kept).
     pub undoable_ids: std::collections::HashSet<crate::edit_history::ActionId>,
     pub current_entity: Option<&'a EntityRef>,
@@ -109,6 +114,10 @@ impl StatusFilter {
             ),
         }
     }
+}
+
+fn ui_tr_with(ctx: &egui::Context, text: &str) -> String {
+    crate::i18n::tr(ctx, text)
 }
 
 fn ui_tr(ctx: &egui::Context, text: &str) -> String {
@@ -215,7 +224,27 @@ impl HistoryUi {
                 .hint_text(ui.tr("Search names, UID, fields, values or messages"))
                 .desired_width(ui.available_width()),
         );
+        // Save filter: known save names across the persisted trail.
+        let mut save_names: Vec<String> =
+            reports.iter().filter_map(|r| r.save_name.clone()).collect();
+        save_names.sort();
+        save_names.dedup();
         ui.horizontal_wrapped(|ui| {
+            ui.label(ui.tr("Save:"));
+            egui::ComboBox::from_id_salt("history_save_filter")
+                .selected_text(
+                    self.save_filter
+                        .as_deref()
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| ui.tr("All saves")),
+                )
+                .width(160.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.save_filter, None, &ui.tr("All saves"));
+                    for name in &save_names {
+                        ui.selectable_value(&mut self.save_filter, Some(name.clone()), name);
+                    }
+                });
             egui::ComboBox::from_id_salt("history_status")
                 .selected_text(ui.tr(self.status.label()))
                 .show_ui(ui, |ui| {
@@ -256,8 +285,12 @@ impl HistoryUi {
     }
 
     fn matches(&self, report: &ActionReport, context: &HistoryUiContext<'_>) -> bool {
-        (self.include_closed_sessions
-            || (report.session_id == context.current_session && report.session_closed.is_none()))
+        self.save_filter
+            .as_deref()
+            .is_none_or(|save| report.save_name.as_deref().is_none_or(|name| name == save))
+            && (self.include_closed_sessions
+                || (report.session_id == context.current_session
+                    && report.session_closed.is_none()))
             && self.status.matches(report.status)
             && (!self.current_entity_only
                 || context
@@ -292,12 +325,17 @@ impl HistoryUi {
     ) {
         let narrow = ui.available_width() <= 650.0;
         let identity = format!(
-            "{} · UID {}",
+            "{} · UID {}{}",
             ui.tr(report.entity.kind.label()),
             report
                 .entity
                 .uid
-                .map_or_else(|| "unavailable".into(), |uid| uid.to_string())
+                .map_or_else(|| "unavailable".into(), |uid| uid.to_string()),
+            report
+                .save_name
+                .as_deref()
+                .map(|save| format!(" · {}", ui_tr(ui.ctx(), save)))
+                .unwrap_or_default(),
         );
         if narrow {
             ui.horizontal_wrapped(|ui| {
@@ -625,6 +663,7 @@ mod tests {
             id: 1,
             session_id: 2,
             pid: 0,
+            save_name: None,
             entity: EntityRef {
                 kind: EntityKind::Player,
                 build: GameBuild::Fm27Steam,
@@ -662,6 +701,7 @@ mod tests {
     fn context() -> HistoryUiContext<'static> {
         HistoryUiContext {
             current_session: 2,
+            current_save: None,
             undoable_ids: [1u64].into_iter().collect(),
             current_entity: None,
             undo_label: Some("Example player: Current ability"),

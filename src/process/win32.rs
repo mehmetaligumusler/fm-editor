@@ -9,6 +9,10 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, MODULEENTRY32W, Module32FirstW, Module32NextW, PROCESSENTRY32W,
     Process32FirstW, Process32NextW, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32, TH32CS_SNAPPROCESS,
 };
+use windows::Win32::System::Memory::{
+    MEM_COMMIT, MEM_IMAGE, MEM_MAPPED, MEM_PRIVATE, MEMORY_BASIC_INFORMATION, PAGE_GUARD,
+    PAGE_NOACCESS, VirtualQueryEx,
+};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_ALL_ACCESS, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
 };
@@ -34,6 +38,48 @@ pub fn open(pid: u32) -> Result<ProcHandle, String> {
     };
     Ok(ProcHandle { handle })
 }
+
+/// (base, size) of every committed, readable, non-image private region —
+/// the heap areas where FM keeps game strings (save names, reports, ...).
+pub fn committed_private_regions(h: &ProcHandle) -> Vec<(u64, usize)> {
+    let mut out = Vec::new();
+    let mut addr: usize = 0x10000;
+    loop {
+        let mut mbi = MEMORY_BASIC_INFORMATION::default();
+        let ok = unsafe {
+            VirtualQueryEx(
+                h.handle,
+                Some(addr as *const c_void),
+                &mut mbi,
+                mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+            )
+        };
+        if ok == 0 {
+            break;
+        }
+        let base = mbi.BaseAddress as usize;
+        let size = mbi.RegionSize;
+        let next = base.saturating_add(size.max(0x1000));
+        let readable = mbi.State.0 == MEM_COMMIT.0
+            && mbi.Type.0 != MEM_IMAGE.0
+            && mbi.Type.0 != MEM_MAPPED.0
+            && (mbi.Protect & PAGE_GUARD).0 == 0
+            && mbi.Protect.0 != PAGE_NOACCESS.0;
+        if readable && size > 0 && size <= 0x4000_0000 {
+            out.push((base as u64, size));
+        }
+        if next <= addr {
+            break;
+        }
+        addr = next;
+        if addr >= 0x7FFF_FFFF_FFFF {
+            break;
+        }
+    }
+    out
+}
+
+/// Read `n` bytes from the target process at `addr`.
 
 /// Read-only builds never acquire VM_WRITE or VM_OPERATION rights.
 pub fn open_read_only(pid: u32) -> Result<ProcHandle, String> {

@@ -213,7 +213,8 @@ pub(super) fn worker_loop(
                         };
                         cache = None;
                         fm = Some(process);
-                        let _ = tx.send(BridgeResult::Attached(pid, build, game_date));
+                        let save_name = fm.as_ref().and_then(crate::save_name::detect_save_name);
+                        let _ = tx.send(BridgeResult::Attached(pid, build, game_date, save_name));
                         if let Some(msg) = notice {
                             let _ = tx.send(BridgeResult::Error(msg));
                         }
@@ -391,8 +392,13 @@ pub(super) fn worker_loop(
                                 // Auto-trigger human manager + entity cache load.
                                 let counts = entity_counts(&current);
                                 cache = Some(current);
-                                let _ =
-                                    tx.send(BridgeResult::Connected(pid, counts, f.game_date()));
+                                let save_name = crate::save_name::detect_save_name(f);
+                                let _ = tx.send(BridgeResult::Connected(
+                                    pid,
+                                    counts,
+                                    f.game_date(),
+                                    save_name,
+                                ));
                                 // Human manager (fast, goes first)
                                 if let (Some(f2), Some(_)) = (&fm, &cache) {
                                     match entity_load::load_human_manager(f2) {

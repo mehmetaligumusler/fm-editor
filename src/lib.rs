@@ -22,6 +22,7 @@ pub mod person;
 pub mod player;
 pub mod process;
 pub mod ratings;
+pub mod save_name;
 pub mod settings;
 pub mod staff;
 pub mod ui;

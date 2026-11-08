@@ -232,3 +232,9 @@ mod tests {
         assert!(pids.contains(&std::process::id()), "pids: {pids:?}");
     }
 }
+
+/// Region enumeration for save-name detection: not implemented on Linux
+/// (Proton) yet — save-name stamping stays Windows-only until needed.
+pub fn committed_private_regions(_h: &ProcHandle) -> Vec<(u64, usize)> {
+    Vec::new()
+}

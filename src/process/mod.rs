@@ -233,6 +233,12 @@ impl FmProcess {
         hash_module_header(&self.module_path)
     }
 
+    /// (base, size) of committed private heap regions — used by save-name
+    /// detection. Delegates to the platform backend.
+    pub fn committed_private_regions(&self) -> Vec<(u64, usize)> {
+        backend::committed_private_regions(&self.handle)
+    }
+
     /// Read the current in-game date through this attachment's verified schema.
     /// Unmapped builds, invalid pointers/dates, and failed reads return None.
     pub fn game_date(&self) -> Option<GameDate> {

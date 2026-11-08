@@ -813,7 +813,8 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
             "Sakatlığın kalan günlerini onaylı karşılaştırmalı yazma yoluyla sıfırlar; geri alınabilir ve oyun değerleri arada değiştiyse reddedilir. Kalıcı olması için oyunda kaydedin.",
         ),
         // ── Intervention overlay badges ───────────────────────────────────
-        ("Original:", "Orijinal:"),
+        ("Save:", "Kayıt:"),
+        ("All saves", "Tüm kayıtlar"),
         (
             "Game value now (natural development):",
             "Oyundaki güncel değer (doğal gelişim):",

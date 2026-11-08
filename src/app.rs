@@ -186,6 +186,7 @@ pub struct FmEditorApp {
     // Audit reports and current-session chronological Undo authority.
     change_history: ChangeHistory,
     history_ui: crate::ui::edit_history::HistoryUi,
+    current_save_name: Option<String>,
     injured_state: pages::injured_players::InjuredPlayersState,
     write_error: Option<String>,
     policy_ui: crate::ui::club_policy::PolicyUi,
@@ -254,6 +255,7 @@ impl FmEditorApp {
             manager_loading: false,
             change_history: ChangeHistory::load(&history_path()),
             history_ui: Default::default(),
+            current_save_name: None,
             injured_state: Default::default(),
             write_error: None,
             policy_ui: Default::default(),
@@ -362,11 +364,14 @@ impl FmEditorApp {
     fn process_results(&mut self) {
         while let Some(result) = self.bridge.try_recv() {
             match result {
-                BridgeResult::Connected(pid, counts, game_date) => {
+                BridgeResult::Connected(pid, counts, game_date, save_name) => {
                     // Same game still running? Revive undo payloads from the
                     // previous editor run (every write keeps its CAS guard).
                     self.change_history.note_pid(pid);
                     self.change_history.revive_session(pid);
+                    self.current_save_name = save_name;
+                    self.change_history
+                        .note_save_name(self.current_save_name.clone());
                     self.game_date = game_date;
                     self.clear_entity_state("Save ready: previous editing context closed");
                     self.clear_cache();
@@ -380,7 +385,10 @@ impl FmEditorApp {
                     let game = self.game_label(pid);
                     self.set_status(format!("Connected to {game}"));
                 }
-                BridgeResult::Attached(pid, build, game_date) => {
+                BridgeResult::Attached(pid, build, game_date, save_name) => {
+                    self.current_save_name = save_name;
+                    self.change_history
+                        .note_save_name(self.current_save_name.clone());
                     self.game_date = game_date;
                     self.conn = ConnState::WaitingForSave(pid);
                     self.clear_entity_state("Reconnected or attached to a process/build");
@@ -1428,6 +1436,7 @@ impl eframe::App for FmEditorApp {
                 crate::overlay::build_overlay(
                     self.change_history.reports(),
                     identity.map(|(k, u)| (k, u)),
+                    self.current_save_name.as_deref(),
                 )
             }
             _ => Default::default(),
@@ -1759,6 +1768,7 @@ impl eframe::App for FmEditorApp {
             self.change_history.reports(),
             &crate::ui::edit_history::HistoryUiContext {
                 current_session: self.change_history.session_id(),
+                current_save: self.current_save_name.as_deref(),
                 undoable_ids,
                 current_entity: edit_entity.as_ref(),
                 undo_label: undo_label.as_deref(),

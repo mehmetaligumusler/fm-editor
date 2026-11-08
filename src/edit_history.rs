@@ -176,6 +176,10 @@ pub struct ActionReport {
     /// undo payloads after an editor restart when the same game still runs.
     #[serde(default)]
     pub pid: u32,
+    /// Loaded save's name when detected (None for legacy entries saved
+    /// before save tracking, or when detection failed).
+    #[serde(default)]
+    pub save_name: Option<String>,
     pub entity: EntityRef,
     pub label: String,
     pub before: String,
@@ -214,6 +218,9 @@ pub struct ChangeHistory {
     last_action: ActionId,
     /// Game PID stamped onto new reports (set on every attach).
     pid: u32,
+    /// Loaded save's name stamped onto new reports (set on every attach /
+    /// save-ready), so the audit trail separates careers by save.
+    save_name: Option<String>,
     /// True when the stored history file needs rewriting.
     dirty: bool,
     /// Undo payloads loaded from disk, revivable when the same game PID
@@ -261,6 +268,7 @@ impl ChangeHistory {
             session: 1,
             last_action: 0,
             pid: 0,
+            save_name: None,
             dirty: false,
             revivable: HashMap::new(),
             restored_max_action: 0,
@@ -270,6 +278,12 @@ impl ChangeHistory {
     /// Stamp the attached game PID onto subsequently submitted reports.
     pub fn note_pid(&mut self, pid: u32) {
         self.pid = pid;
+    }
+
+    /// Stamp the loaded save's name onto subsequently submitted reports.
+    pub fn note_save_name(&mut self, name: Option<String>) {
+        self.save_name = name;
+        self.dirty = true;
     }
 
     /// Load the persisted audit trail. Reports are always visible; undo
@@ -501,6 +515,7 @@ impl ChangeHistory {
                 id,
                 session_id: self.session,
                 pid: self.pid,
+                save_name: self.save_name.clone(),
                 entity: entity.clone(),
                 label: action.label,
                 before: action.before,
@@ -1202,6 +1217,7 @@ mod uncertainty_retention_tests {
             id: 1,
             session_id: 1,
             pid: 0,
+            save_name: None,
             entity: EntityRef {
                 kind: EntityKind::Club,
                 build: GameBuild::Fm27Steam,
