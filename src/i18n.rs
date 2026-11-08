@@ -812,6 +812,12 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
             "Zeroes the injury's remaining days through the acknowledged compare-and-swap path; undoable, and refused if the game changed the values in the meantime. Save in game to make it permanent.",
             "Sakatlığın kalan günlerini onaylı karşılaştırmalı yazma yoluyla sıfırlar; geri alınabilir ve oyun değerleri arada değiştiyse reddedilir. Kalıcı olması için oyunda kaydedin.",
         ),
+        // ── Intervention overlay badges ───────────────────────────────────
+        ("Original:", "Orijinal:"),
+        (
+            "Click to undo this intervention.",
+            "Bu müdahalenizi geri almak için tıklayın.",
+        ),
         // ── Change history window ─────────────────────────────────────────
         ("History", "Geçmiş"),
         ("Undo latest", "En son eylemi geri al"),

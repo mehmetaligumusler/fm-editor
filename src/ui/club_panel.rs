@@ -497,6 +497,11 @@ fn u32_drag(
                 changed
             })
             .inner;
+        if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
+            club_badge(ui, &entry, &old_bytes, |d| {
+                fmt(d.clamp(0, u32::MAX as i64) as u32)
+            });
+        }
     });
     if enabled && changed {
         let new_val = val.clamp(0, 4_294_967_295) as u32;
@@ -575,6 +580,9 @@ fn f32_drag(
                 changed
             })
             .inner;
+        if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
+            club_badge(ui, &entry, &old_bytes, |d| fmt(d as f32));
+        }
     });
     if enabled && changed && (val - old_val).abs() > 0.001 {
         let new_bytes = val.to_le_bytes();
@@ -590,6 +598,42 @@ fn f32_drag(
                 fmt(val),
             )),
         });
+    }
+}
+
+/// Net-delta badge for club rows; hides when the chain no longer holds.
+fn club_badge(
+    ui: &mut egui::Ui,
+    entry: &crate::overlay::OverlayEntry,
+    current_bytes: &[u8],
+    display: impl Fn(i64) -> String,
+) {
+    if current_bytes != entry.baseline && current_bytes != entry.current {
+        return;
+    }
+    let (text, color) = if entry.delta >= 0 {
+        (
+            format!("+{}", display(entry.delta)),
+            egui::Color32::from_rgb(70, 200, 110),
+        )
+    } else {
+        (display(entry.delta), egui::Color32::from_rgb(240, 110, 100))
+    };
+    let arrow = '\u{2192}';
+    let hover = format!(
+        "{} {} {} {}\n{}",
+        ui.tr("Original:"),
+        display(field_widget::numeric_i64(&entry.baseline)),
+        arrow,
+        display(field_widget::numeric_i64(&entry.current)),
+        ui.tr("Click to undo this intervention."),
+    );
+    let response = ui.add(
+        egui::Label::new(egui::RichText::new(text).strong().color(color))
+            .sense(egui::Sense::click()),
+    );
+    if response.on_hover_text(hover).clicked() {
+        crate::overlay::request_undo_for(ui, entry);
     }
 }
 
@@ -636,6 +680,9 @@ fn u8_drag_1_20(
                 .changed()
             })
             .inner;
+        if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
+            club_badge(ui, &entry, std::slice::from_ref(&old), |d| d.to_string());
+        }
     });
     if enabled && changed {
         let new_val = val.clamp(1, 20) as u8;

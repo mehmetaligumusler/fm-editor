@@ -121,6 +121,59 @@ fn render_out_of_range_label(ui: &mut egui::Ui, label: &str, raw_text: String, w
     });
 }
 
+/// Small colored net-delta badge (e.g. "+6") beside a value box, with a
+/// hover text and a click-to-undo action. Hidden when the chain no longer
+/// holds (the bytes at this address match neither baseline nor current —
+/// e.g. the save was reloaded and the addresses went stale).
+fn intervention_badge(
+    ui: &mut egui::Ui,
+    entry: &crate::overlay::OverlayEntry,
+    current_bytes: &[u8],
+    display: impl Fn(i64) -> String,
+) {
+    if current_bytes != entry.baseline && current_bytes != entry.current {
+        return;
+    }
+    let (text, color) = if entry.delta >= 0 {
+        (
+            format!("+{}", display(entry.delta)),
+            egui::Color32::from_rgb(70, 200, 110),
+        )
+    } else {
+        (display(entry.delta), egui::Color32::from_rgb(240, 110, 100))
+    };
+    let arrow = '\u{2192}';
+    let hover = format!(
+        "{} {} {} {}\\n{}",
+        ui.tr("Original:"),
+        display(numeric_i64(&entry.baseline)),
+        arrow,
+        display(numeric_i64(&entry.current)),
+        ui.tr("Click to undo this intervention."),
+    );
+    let response = ui.add(
+        egui::Label::new(egui::RichText::new(text).strong().color(color))
+            .sense(egui::Sense::click()),
+    );
+    if response.on_hover_text(hover).clicked() {
+        crate::overlay::request_undo_for(ui, entry);
+    }
+}
+
+/// Numeric display of raw bytes without the overlay's delta sign.
+pub fn numeric_i64(bytes: &[u8]) -> i64 {
+    let mut v: u64 = 0;
+    for (i, b) in bytes.iter().enumerate().take(8) {
+        v |= u64::from(*b) << (8 * i);
+    }
+    match bytes.len() {
+        1 => v as u8 as i64,
+        2 => v as u16 as i64,
+        4 => v as u32 as i64,
+        _ => v as i64,
+    }
+}
+
 /// Render one attribute: label + colored DragValue.
 /// Updates `raw[offset]` in-place and returns a FieldEdit if changed.
 ///
@@ -165,6 +218,11 @@ pub fn attr_edit(
                 .speed(0.1),
             VALUE_SIZE[0],
         );
+        if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
+            intervention_badge(ui, &entry, std::slice::from_ref(&old_raw_byte), |d| {
+                d.to_string()
+            });
+        }
     });
 
     // Only emit an edit if the *displayed* value actually changed. This
@@ -453,6 +511,9 @@ pub fn raw_u8_edit(
                 .speed(0.5),
             VALUE_SIZE[0],
         );
+        if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
+            intervention_badge(ui, &entry, std::slice::from_ref(&old), |d| d.to_string());
+        }
     });
 
     if changed {
@@ -507,6 +568,9 @@ pub fn raw_u16_edit(
                 .speed(1.0),
             50.0,
         );
+        if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
+            intervention_badge(ui, &entry, &old_bytes, |d| d.to_string());
+        }
     });
 
     if changed {
@@ -592,6 +656,21 @@ pub fn raw_u32_edit(
         changed = number_edit(ui, drag, 90.0);
         if money {
             ui.weak(&suffix);
+        }
+        if money {
+            if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
+                let factor = cur.factor() * period_factor;
+                intervention_badge(ui, &entry, &old_bytes, |d| {
+                    format!(
+                        "{}{} {}",
+                        if d >= 0 { "+" } else { "\u{2212}" },
+                        crate::i18n::thousands((d.unsigned_abs() as f64 * factor).round() as u64),
+                        cur.symbol()
+                    )
+                });
+            }
+        } else if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
+            intervention_badge(ui, &entry, &old_bytes, |d| d.to_string());
         }
     });
 

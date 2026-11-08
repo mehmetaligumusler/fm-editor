@@ -1398,6 +1398,11 @@ impl eframe::App for FmEditorApp {
         // the active page's entity type, so e.g. a Player tab doesn't leak
         // into the Club Search view.
 
+        // Net-modification overlay: badges derive from the audit trail each
+        // frame; the widget-side current-bytes check hides stale chains.
+        let overlay_map = crate::overlay::build_overlay(self.change_history.reports());
+        crate::overlay::publish(ctx, &overlay_map);
+
         // ===== Central Panel =====
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -1869,6 +1874,21 @@ impl eframe::App for FmEditorApp {
         if let Some(ids) = delete_listed.take() {
             if let Err(reason) = self.change_history.delete_actions(&ids) {
                 self.write_error = Some(reason);
+            }
+        }
+        if let Some(action_id) = crate::overlay::take_undo_request(ctx) {
+            if edits.is_empty()
+                && self.undo_unavailable_reason().is_none()
+                && self.change_history.undoable(action_id)
+            {
+                match self.change_history.undo_actions(&[action_id]) {
+                    Ok(commands) => {
+                        for cmd in commands {
+                            self.bridge.send(cmd);
+                        }
+                    }
+                    Err(reason) => self.write_error = Some(reason),
+                }
             }
         }
         // The audit trail persists across editor restarts.
