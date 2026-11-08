@@ -815,6 +815,10 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         // ── Intervention overlay badges ───────────────────────────────────
         ("Original:", "Orijinal:"),
         (
+            "Game value now (natural development):",
+            "Oyundaki güncel değer (doğal gelişim):",
+        ),
+        (
             "Click to undo this intervention.",
             "Bu müdahalenizi geri almak için tıklayın.",
         ),

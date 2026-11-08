@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use eframe::egui;
 
-use crate::edit_history::{ActionId, ActionReport, ActionStatus, AttemptOutcome};
+use crate::edit_history::{ActionId, ActionReport, ActionStatus, AttemptOutcome, EntityKind};
 
 /// One address's cumulative intervention.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,11 +53,25 @@ fn numeric(bytes: &[u8]) -> i64 {
     }
 }
 
-/// Build the overlay from all reports. Addresses from stale sessions may
-/// appear; the widget-side validity check (current bytes must match either
-/// baseline or current) hides badges whose chain no longer holds.
-pub fn build_overlay(reports: &[ActionReport]) -> HashMap<u64, OverlayEntry> {
-    let mut ordered: Vec<&ActionReport> = reports.iter().collect();
+/// Build the overlay for the entity the user is currently viewing. Reports
+/// are filtered by identity (kind + UID): players develop on their own, so
+/// the LIVE bytes may drift from what the user wrote — the badge still shows
+/// the user's intervention delta, independent of natural growth. An entity
+/// from a different save never matches (its UID differs), which is what
+/// keeps stale addresses from other careers out of the map.
+pub fn build_overlay(
+    reports: &[ActionReport],
+    current: Option<(EntityKind, u32)>,
+) -> HashMap<u64, OverlayEntry> {
+    let mut ordered: Vec<&ActionReport> = reports
+        .iter()
+        .filter(|r| match (current, &r.entity.kind) {
+            (Some((kind, uid)), report_kind) => {
+                kind == *report_kind && r.entity.uid.is_some_and(|u| u == uid)
+            }
+            (None, _) => false,
+        })
+        .collect();
     ordered.sort_by_key(|r| r.id);
     let mut chains: HashMap<u64, (Vec<u8>, Option<(Vec<u8>, ActionId)>)> = HashMap::new();
     for report in ordered {
@@ -155,6 +169,8 @@ mod tests {
         }
     }
 
+    const VIEWING: Option<(EntityKind, u32)> = Some((EntityKind::Player, 7));
+
     fn change(addr: u64, old: u8, new: u8) -> ChangeReport {
         ChangeReport {
             field: "Morale".into(),
@@ -198,7 +214,7 @@ mod tests {
             report(1, ActionStatus::Applied, vec![change(0x1000, 8, 10)]),
             report(2, ActionStatus::Applied, vec![change(0x1000, 10, 14)]),
         ];
-        let map = build_overlay(&reports);
+        let map = build_overlay(&reports, VIEWING);
         let e = map.get(&0x1000).unwrap();
         assert_eq!(e.baseline, vec![8]);
         assert_eq!(e.current, vec![14]);
@@ -213,7 +229,7 @@ mod tests {
             report(1, ActionStatus::Undone, vec![change(0x1000, 8, 14)]),
             report(2, ActionStatus::Applied, vec![change(0x1000, 8, 10)]),
         ];
-        let map = build_overlay(&reports);
+        let map = build_overlay(&reports, VIEWING);
         let e = map.get(&0x1000).unwrap();
         assert_eq!(e.delta, 2);
         assert_eq!(e.baseline, vec![8]);
@@ -231,7 +247,7 @@ mod tests {
             ActionStatus::Applied,
             vec![change(0x1000, 6, 3), big],
         )];
-        let map = build_overlay(&reports);
+        let map = build_overlay(&reports, VIEWING);
         assert_eq!(map.get(&0x1000).unwrap().delta, -3);
         let wide = map.get(&0x2000).unwrap();
         assert_eq!(wide.width, 4);
@@ -243,7 +259,18 @@ mod tests {
         let mut refused = change(0x1000, 8, 20);
         refused.attempts[0].outcome = AttemptOutcome::Refused;
         let reports = vec![report(1, ActionStatus::Refused, vec![refused])];
-        assert!(build_overlay(&reports).is_empty());
+        assert!(build_overlay(&reports, VIEWING).is_empty());
+    }
+
+    #[test]
+    fn other_entities_edits_never_leak_into_the_overlay() {
+        let mut other = entity();
+        other.uid = Some(99);
+        other.address = 0x30000;
+        let mut r = report(1, ActionStatus::Applied, vec![change(0x4000, 8, 20)]);
+        r.entity = other;
+        // Viewing player uid 7: uid-99 edits must not appear.
+        assert!(build_overlay(&[r], VIEWING).is_empty());
     }
 
     #[test]
@@ -252,6 +279,6 @@ mod tests {
             report(1, ActionStatus::Applied, vec![change(0x1000, 8, 14)]),
             report(2, ActionStatus::Applied, vec![change(0x1000, 14, 8)]),
         ];
-        assert!(build_overlay(&reports).is_empty());
+        assert!(build_overlay(&reports, VIEWING).is_empty());
     }
 }

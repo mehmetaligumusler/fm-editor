@@ -1400,7 +1400,38 @@ impl eframe::App for FmEditorApp {
 
         // Net-modification overlay: badges derive from the audit trail each
         // frame; the widget-side current-bytes check hides stale chains.
-        let overlay_map = crate::overlay::build_overlay(self.change_history.reports());
+        // Current entity identity (kind + UID) from the active tab: the
+        // overlay only carries this entity's interventions, so edits from
+        // other entities or other careers never leak into the badges.
+        let overlay_map = match (
+            self.active_tab.and_then(|idx| self.open_tabs.get(idx)),
+            cache_arc.as_deref(),
+        ) {
+            (Some(tab), Some(cache)) => {
+                let identity = match tab.entity_type {
+                    EntityTabType::Player => cache
+                        .players
+                        .get(tab.index)
+                        .map(|p| (crate::edit_history::EntityKind::Player, p.uid))
+                        .filter(|(_, uid)| *uid != 0),
+                    EntityTabType::Staff => cache
+                        .staff
+                        .get(tab.index)
+                        .map(|s| (crate::edit_history::EntityKind::Staff, s.uid))
+                        .filter(|(_, uid)| *uid != 0),
+                    EntityTabType::Club => cache
+                        .clubs
+                        .get(tab.index)
+                        .map(|c| (crate::edit_history::EntityKind::Club, c.uid))
+                        .filter(|(_, uid)| *uid != 0),
+                };
+                crate::overlay::build_overlay(
+                    self.change_history.reports(),
+                    identity.map(|(k, u)| (k, u)),
+                )
+            }
+            _ => Default::default(),
+        };
         crate::overlay::publish(ctx, &overlay_map);
 
         // ===== Central Panel =====

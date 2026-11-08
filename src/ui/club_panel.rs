@@ -608,9 +608,12 @@ fn club_badge(
     current_bytes: &[u8],
     display: impl Fn(i64) -> String,
 ) {
-    if current_bytes != entry.baseline && current_bytes != entry.current {
-        return;
-    }
+    // The live bytes may drift from the user's edit (players develop on
+    // their own) — the badge still shows the USER's intervention delta;
+    // drift is reported in the hover text instead.
+    let live = field_widget::numeric_i64(current_bytes);
+    let drift = live != field_widget::numeric_i64(&entry.baseline)
+        && live != field_widget::numeric_i64(&entry.current);
     let (text, color) = if entry.delta >= 0 {
         (
             format!("+{}", display(entry.delta)),
@@ -620,14 +623,21 @@ fn club_badge(
         (display(entry.delta), egui::Color32::from_rgb(240, 110, 100))
     };
     let arrow = '\u{2192}';
-    let hover = format!(
-        "{} {} {} {}\n{}",
+    let mut hover = format!(
+        "{} {} {} {}",
         ui.tr("Original:"),
         display(field_widget::numeric_i64(&entry.baseline)),
         arrow,
         display(field_widget::numeric_i64(&entry.current)),
-        ui.tr("Click to undo this intervention."),
     );
+    if drift {
+        hover.push_str(&format!(
+            "\n{} {}",
+            ui.tr("Game value now (natural development):"),
+            display(live)
+        ));
+    }
+    hover.push_str(&format!("\n{}", ui.tr("Click to undo this intervention.")));
     let response = ui.add(
         egui::Label::new(egui::RichText::new(text).strong().color(color))
             .sense(egui::Sense::click()),
