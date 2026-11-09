@@ -364,14 +364,15 @@ impl FmEditorApp {
     fn process_results(&mut self) {
         while let Some(result) = self.bridge.try_recv() {
             match result {
-                BridgeResult::Connected(pid, counts, game_date, save_name) => {
+                BridgeResult::Connected(pid, counts, game_date) => {
                     // Same game still running? Revive undo payloads from the
                     // previous editor run (every write keeps its CAS guard).
                     self.change_history.note_pid(pid);
                     self.change_history.revive_session(pid);
-                    self.current_save_name = save_name;
-                    self.change_history
-                        .note_save_name(self.current_save_name.clone());
+                    // The name arrives later as SaveName; don't keep the
+                    // previous save's name attached to this one.
+                    self.current_save_name = None;
+                    self.change_history.note_save_name(None);
                     self.game_date = game_date;
                     self.clear_entity_state("Save ready: previous editing context closed");
                     self.clear_cache();
@@ -385,10 +386,9 @@ impl FmEditorApp {
                     let game = self.game_label(pid);
                     self.set_status(format!("Connected to {game}"));
                 }
-                BridgeResult::Attached(pid, build, game_date, save_name) => {
-                    self.current_save_name = save_name;
-                    self.change_history
-                        .note_save_name(self.current_save_name.clone());
+                BridgeResult::Attached(pid, build, game_date) => {
+                    self.current_save_name = None;
+                    self.change_history.note_save_name(None);
                     self.game_date = game_date;
                     self.conn = ConnState::WaitingForSave(pid);
                     self.clear_entity_state("Reconnected or attached to a process/build");
@@ -397,6 +397,19 @@ impl FmEditorApp {
                     self.game_choices.clear();
                     let game = self.game_label(pid);
                     self.set_status(format!("Attached to {game} \u{2014} waiting for save"));
+                }
+                BridgeResult::SaveName(pid, name) => {
+                    // Late-arriving save name, found by the worker's heap
+                    // scan. Bind it to the attached game — a stale result
+                    // from a previous attach must not rename this save.
+                    if matches!(
+                        self.conn,
+                        ConnState::Ready(p) | ConnState::WaitingForSave(p) if p == pid
+                    ) {
+                        self.current_save_name = name;
+                        self.change_history
+                            .note_save_name(self.current_save_name.clone());
+                    }
                 }
                 BridgeResult::ChooseGame(games) => {
                     // A stale auto-connect answer after a game was attached.
@@ -2843,7 +2856,7 @@ mod edit_history_integration_tests {
                 before: "12".into(),
                 after: "15".into(),
                 group,
-            numeric_delta: None,
+                numeric_delta: None,
             }),
         }
     }

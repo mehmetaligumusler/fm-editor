@@ -139,13 +139,10 @@ pub enum BridgeCmd {
 
 pub enum BridgeResult {
     /// fm.exe attached AND a save is loaded (entity arrays populated and
-    /// stable across two consecutive probes).
-    Connected(
-        u32,
-        EntityCounts,
-        Option<crate::game_date::GameDate>,
-        Option<String>,
-    ),
+    /// stable across two consecutive probes). The save's display name, if
+    /// found, arrives separately as [`BridgeResult::SaveName`] so the
+    /// heap scan behind it never delays this reply.
+    Connected(u32, EntityCounts, Option<crate::game_date::GameDate>),
     /// fm.exe attached but no save is loaded yet, or save creation is
     /// still in progress. The worker keeps pinging; once counts are
     /// stable + plausible, we promote to Connected.
@@ -153,8 +150,12 @@ pub enum BridgeResult {
         u32,
         crate::game_version::GameBuild,
         Option<crate::game_date::GameDate>,
-        Option<String>,
     ),
+    /// The loaded save's display name for this PID, found by scanning the
+    /// game's heap. Sent after `Connected`/`Attached` (or immediately when
+    /// the same save identity was seen before); `None` when no name could
+    /// be matched. Bind it to the PID it names.
+    SaveName(u32, Option<String>),
     /// Several games are running (they all run as `fm.exe`) and no PID was
     /// given. Nothing was attached; the UI asks which one to use.
     ChooseGame(Vec<crate::process::RunningGame>),

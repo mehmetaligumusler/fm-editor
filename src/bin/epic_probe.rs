@@ -31,10 +31,10 @@ fn main() -> Result<(), String> {
         }
         while let Some(result) = bridge.try_recv() {
             match result {
-                BridgeResult::Attached(_, build, _, _) if build != GameBuild::Fm24Epic => {
+                BridgeResult::Attached(_, build, _) if build != GameBuild::Fm24Epic => {
                     return Err("unexpected build".into());
                 }
-                BridgeResult::Connected(_, _, _, _) => {
+                BridgeResult::Connected(_, _, _) => {
                     loading = true;
                     bridge.send(BridgeCmd::LoadEntityCache);
                 }
