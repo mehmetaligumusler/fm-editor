@@ -121,42 +121,47 @@ fn render_out_of_range_label(ui: &mut egui::Ui, label: &str, raw_text: String, w
     });
 }
 
-/// Small colored net-delta badge (e.g. "+6") beside a value box, with a
-/// hover text and a click-to-undo action. Hidden when the chain no longer
-/// holds (the bytes at this address match neither baseline nor current —
-/// e.g. the save was reloaded and the addresses went stale).
+/// Small colored net-delta badge (e.g. "+1") beside a value box, computed
+/// in DISPLAYED space (the caller passes decoded/converted numbers — raw
+/// bytes of encoded attributes differ from what the screen shows), with a
+/// hover text and a click-to-undo action. `live_displayed` is the value
+/// currently in game memory: players develop on their own, so the badge
+/// still shows the USER's intervention delta while the hover reports the
+/// game's own drift.
 fn intervention_badge(
     ui: &mut egui::Ui,
     entry: &crate::overlay::OverlayEntry,
-    current_bytes: &[u8],
+    baseline_displayed: i64,
+    current_displayed: i64,
+    live_displayed: i64,
     display: impl Fn(i64) -> String,
 ) {
-    // The live bytes may drift from the user's edit (players develop on
-    // their own) — the badge still shows the USER's intervention delta;
-    // drift is reported in the hover text instead.
-    let live = numeric_i64(current_bytes);
-    let drift = live != numeric_i64(&entry.baseline) && live != numeric_i64(&entry.current);
-    let (text, color) = if entry.delta >= 0 {
+    let delta = current_displayed - baseline_displayed;
+    if delta == 0 {
+        return;
+    }
+    let drift = live_displayed != baseline_displayed && live_displayed != current_displayed;
+    let (text, color) = if delta >= 0 {
         (
-            format!("+{}", display(entry.delta)),
+            format!("+{}", display(delta)),
             egui::Color32::from_rgb(70, 200, 110),
         )
     } else {
-        (display(entry.delta), egui::Color32::from_rgb(240, 110, 100))
+        (display(delta), egui::Color32::from_rgb(240, 110, 100))
     };
     let arrow = '\u{2192}';
     let mut hover = format!(
         "{} {} {} {}",
         ui.tr("Original:"),
-        display(numeric_i64(&entry.baseline)),
+        display(baseline_displayed),
         arrow,
-        display(numeric_i64(&entry.current)),
+        display(current_displayed),
     );
     if drift {
         hover.push_str(&format!(
             "\n{} {}",
             ui.tr("Game value now (natural development):"),
-            display(live)
+            display(live_displayed)
         ));
     }
     hover.push_str(&format!("\n{}", ui.tr("Click to undo this intervention.")));
@@ -228,9 +233,27 @@ pub fn attr_edit(
             VALUE_SIZE[0],
         );
         if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
-            intervention_badge(ui, &entry, std::slice::from_ref(&old_raw_byte), |d| {
-                d.to_string()
-            });
+            // Encoded attributes store raw = displayed*5-2: deltas must be
+            // computed in DISPLAYED space or the badge shows wrong numbers
+            // (e.g. raw 26→28 is displayed 5→6, a +1, not raw's +2).
+            let decode = |b: u8| -> i64 {
+                let displayed = loc.decode_u8(b) as i64;
+                if displayed >= 1 {
+                    displayed
+                } else {
+                    // below-minimum sentinel bytes decode to 0; clamp to 1
+                    // so the baseline stays comparable.
+                    1
+                }
+            };
+            intervention_badge(
+                ui,
+                &entry,
+                decode(entry.baseline[0]),
+                decode(entry.current[0]),
+                decode(old_raw_byte),
+                |d| d.to_string(),
+            );
         }
     });
 
@@ -521,7 +544,14 @@ pub fn raw_u8_edit(
             VALUE_SIZE[0],
         );
         if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
-            intervention_badge(ui, &entry, std::slice::from_ref(&old), |d| d.to_string());
+            intervention_badge(
+                ui,
+                &entry,
+                numeric_i64(&entry.baseline),
+                numeric_i64(&entry.current),
+                old as i64,
+                |d| d.to_string(),
+            );
         }
     });
 
@@ -578,7 +608,14 @@ pub fn raw_u16_edit(
             50.0,
         );
         if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
-            intervention_badge(ui, &entry, &old_bytes, |d| d.to_string());
+            intervention_badge(
+                ui,
+                &entry,
+                numeric_i64(&entry.baseline),
+                numeric_i64(&entry.current),
+                old_val as i64,
+                |d| d.to_string(),
+            );
         }
     });
 
@@ -669,17 +706,32 @@ pub fn raw_u32_edit(
         if money {
             if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
                 let factor = cur.factor() * period_factor;
-                intervention_badge(ui, &entry, &old_bytes, |d| {
-                    format!(
-                        "{}{} {}",
-                        if d >= 0 { "+" } else { "\u{2212}" },
-                        crate::i18n::thousands((d.unsigned_abs() as f64 * factor).round() as u64),
-                        cur.symbol()
-                    )
-                });
+                let conv =
+                    |raw: &[u8]| -> i64 { (numeric_i64(raw) as f64 * factor).round() as i64 };
+                intervention_badge(
+                    ui,
+                    &entry,
+                    conv(&entry.baseline),
+                    conv(&entry.current),
+                    conv(&old_bytes),
+                    |d| {
+                        format!(
+                            "{} {}",
+                            crate::i18n::thousands(d.unsigned_abs() as u64),
+                            cur.symbol()
+                        )
+                    },
+                );
             }
         } else if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
-            intervention_badge(ui, &entry, &old_bytes, |d| d.to_string());
+            intervention_badge(
+                ui,
+                &entry,
+                numeric_i64(&entry.baseline),
+                numeric_i64(&entry.current),
+                old_val as i64,
+                |d| d.to_string(),
+            );
         }
     });
 

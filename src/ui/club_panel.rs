@@ -498,9 +498,17 @@ fn u32_drag(
             })
             .inner;
         if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
-            club_badge(ui, &entry, &old_bytes, |d| {
-                fmt(d.clamp(0, u32::MAX as i64) as u32)
-            });
+            let conv = |raw: &[u8]| -> i64 {
+                (field_widget::numeric_i64(raw) as f64 * factor).round() as i64
+            };
+            club_badge(
+                ui,
+                &entry,
+                conv(&entry.baseline),
+                conv(&entry.current),
+                conv(&old_bytes),
+                |d| fmt(d.clamp(0, u32::MAX as i64) as u32),
+            );
         }
     });
     if enabled && changed {
@@ -581,7 +589,17 @@ fn f32_drag(
             })
             .inner;
         if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
-            club_badge(ui, &entry, &old_bytes, |d| fmt(d as f32));
+            let conv = |raw: &[u8]| -> i64 {
+                (f32::from_le_bytes(raw[..4].try_into().unwrap()) as f64 * factor).round() as i64
+            };
+            club_badge(
+                ui,
+                &entry,
+                conv(&entry.baseline),
+                conv(&entry.current),
+                conv(&old_bytes),
+                |d| fmt(d.clamp(0, 100_000) as f32),
+            );
         }
     });
     if enabled && changed && (val - old_val).abs() > 0.001 {
@@ -601,40 +619,46 @@ fn f32_drag(
     }
 }
 
-/// Net-delta badge for club rows; hides when the chain no longer holds.
+/// Net-delta badge for club rows, computed in DISPLAYED space (the caller
+/// converts raw values through the currency/period factor) so money rows
+/// show the game-style amount, and reported drift stays honest.
 fn club_badge(
     ui: &mut egui::Ui,
     entry: &crate::overlay::OverlayEntry,
-    current_bytes: &[u8],
+    baseline_displayed: i64,
+    current_displayed: i64,
+    live_displayed: i64,
     display: impl Fn(i64) -> String,
 ) {
-    // The live bytes may drift from the user's edit (players develop on
+    // The live value may drift from the user's edit (players develop on
     // their own) — the badge still shows the USER's intervention delta;
     // drift is reported in the hover text instead.
-    let live = field_widget::numeric_i64(current_bytes);
-    let drift = live != field_widget::numeric_i64(&entry.baseline)
-        && live != field_widget::numeric_i64(&entry.current);
-    let (text, color) = if entry.delta >= 0 {
+    let delta = current_displayed - baseline_displayed;
+    if delta == 0 {
+        return;
+    }
+    let drift = live_displayed != baseline_displayed && live_displayed != current_displayed;
+    let (text, color) = if delta >= 0 {
         (
-            format!("+{}", display(entry.delta)),
+            format!("+{}", display(delta)),
             egui::Color32::from_rgb(70, 200, 110),
         )
     } else {
-        (display(entry.delta), egui::Color32::from_rgb(240, 110, 100))
+        (display(delta), egui::Color32::from_rgb(240, 110, 100))
     };
     let arrow = '\u{2192}';
     let mut hover = format!(
         "{} {} {} {}",
         ui.tr("Original:"),
-        display(field_widget::numeric_i64(&entry.baseline)),
+        display(baseline_displayed),
         arrow,
-        display(field_widget::numeric_i64(&entry.current)),
+        display(current_displayed),
     );
     if drift {
         hover.push_str(&format!(
             "\n{} {}",
             ui.tr("Game value now (natural development):"),
-            display(live)
+            display(live_displayed)
         ));
     }
     hover.push_str(&format!("\n{}", ui.tr("Click to undo this intervention.")));
@@ -691,7 +715,14 @@ fn u8_drag_1_20(
             })
             .inner;
         if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
-            club_badge(ui, &entry, std::slice::from_ref(&old), |d| d.to_string());
+            club_badge(
+                ui,
+                &entry,
+                entry.baseline.first().copied().unwrap_or(0) as i64,
+                entry.current.first().copied().unwrap_or(0) as i64,
+                old as i64,
+                |d| d.to_string(),
+            );
         }
     });
     if enabled && changed {
