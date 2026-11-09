@@ -498,15 +498,15 @@ fn u32_drag(
             })
             .inner;
         if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
-            let conv = |raw: &[u8]| -> i64 {
-                (field_widget::numeric_i64(raw) as f64 * factor).round() as i64
-            };
+            let user = ((entry.user_delta as f64 * factor).round()) as i64;
+            let live = ((old_val as f64 * factor).round()) as i64;
+            let base = field_widget::numeric_i64(&entry.baseline) as f64;
             club_badge(
                 ui,
                 &entry,
-                conv(&entry.baseline),
-                conv(&entry.current),
-                conv(&old_bytes),
+                user,
+                live,
+                (base * factor).round() as i64,
                 |d| fmt(d.clamp(0, u32::MAX as i64) as u32),
             );
         }
@@ -521,11 +521,14 @@ fn u32_drag(
                 old_raw: old_bytes.to_vec(),
                 new_raw: new_bytes.to_vec(),
                 description: format!("{label}: {} \u{2192} {}", fmt(old_val), fmt(new_val)),
-                presentation: Some(crate::edit_history::EditPresentation::new(
-                    label,
-                    fmt(old_val),
-                    fmt(new_val),
-                )),
+                presentation: Some(
+                    crate::edit_history::EditPresentation::new(
+                        label,
+                        fmt(old_val),
+                        fmt(new_val),
+                    )
+                    .with_numeric_delta(new_val as i64 - old_val as i64),
+                ),
             });
         }
     }
@@ -589,17 +592,13 @@ fn f32_drag(
             })
             .inner;
         if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
-            let conv = |raw: &[u8]| -> i64 {
-                (f32::from_le_bytes(raw[..4].try_into().unwrap()) as f64 * factor).round() as i64
-            };
-            club_badge(
-                ui,
-                &entry,
-                conv(&entry.baseline),
-                conv(&entry.current),
-                conv(&old_bytes),
-                |d| fmt(d.clamp(0, 100_000) as f32),
-            );
+            let user = ((entry.user_delta as f64 * factor).round()) as i64;
+            let live = ((old_val as f64 * factor).round()) as i64;
+            let base = f32::from_le_bytes(entry.baseline[..4].try_into().unwrap()) as f64
+                * factor;
+            club_badge(ui, &entry, user, live, base.round() as i64, |d| {
+                fmt(d.clamp(0, 100_000) as f32)
+            });
         }
     });
     if enabled && changed && (val - old_val).abs() > 0.001 {
@@ -610,58 +609,59 @@ fn f32_drag(
             old_raw: old_bytes.to_vec(),
             new_raw: new_bytes.to_vec(),
             description: format!("{label}: {} \u{2192} {}", fmt(old_val), fmt(val)),
-            presentation: Some(crate::edit_history::EditPresentation::new(
-                label,
-                fmt(old_val),
-                fmt(val),
-            )),
+            presentation: Some(
+                crate::edit_history::EditPresentation::new(label, fmt(old_val), fmt(val))
+                    .with_numeric_delta(((val - old_val) as f64 * factor).round() as i64),
+            ),
         });
     }
 }
 
-/// Net-delta badge for club rows, computed in DISPLAYED space (the caller
-/// converts raw values through the currency/period factor) so money rows
-/// show the game-style amount, and reported drift stays honest.
+/// Net-delta badge for club rows: shows the USER's cumulative
+/// intervention; natural development is reported separately in the hover.
 fn club_badge(
     ui: &mut egui::Ui,
     entry: &crate::overlay::OverlayEntry,
-    baseline_displayed: i64,
-    current_displayed: i64,
+    user_delta: i64,
     live_displayed: i64,
+    baseline_displayed: i64,
     display: impl Fn(i64) -> String,
 ) {
-    // The live value may drift from the user's edit (players develop on
-    // their own) — the badge still shows the USER's intervention delta;
-    // drift is reported in the hover text instead.
-    let delta = current_displayed - baseline_displayed;
-    if delta == 0 {
+    if user_delta == 0 {
         return;
     }
-    let drift = live_displayed != baseline_displayed && live_displayed != current_displayed;
-    let (text, color) = if delta >= 0 {
+    // Natural development: whatever the game moved on its own (live minus
+    // the user's cumulative intervention from the baseline).
+    let natural = live_displayed - baseline_displayed - user_delta;
+    let (text, color) = if user_delta >= 0 {
         (
-            format!("+{}", display(delta)),
+            format!("+{}", display(user_delta)),
             egui::Color32::from_rgb(70, 200, 110),
         )
     } else {
-        (display(delta), egui::Color32::from_rgb(240, 110, 100))
+        (display(user_delta), egui::Color32::from_rgb(240, 110, 100))
     };
-    let arrow = '\u{2192}';
+    let arrow = '→';
     let mut hover = format!(
-        "{} {} {} {}",
+        "{} {} {} {}
+{} {}",
         ui.tr("Original:"),
         display(baseline_displayed),
         arrow,
-        display(current_displayed),
+        display(live_displayed),
+        ui.tr("Your interventions:"),
+        display(user_delta),
     );
-    if drift {
+    if natural != 0 {
         hover.push_str(&format!(
-            "\n{} {}",
-            ui.tr("Game value now (natural development):"),
-            display(live_displayed)
+            "
+{} {}",
+            ui.tr("Natural development (by the game):"),
+            display(natural)
         ));
     }
-    hover.push_str(&format!("\n{}", ui.tr("Click to undo this intervention.")));
+    hover.push_str(&format!("
+{}", ui.tr("Click to undo this intervention.")));
     let response = ui.add(
         egui::Label::new(egui::RichText::new(text).strong().color(color))
             .sense(egui::Sense::click()),
@@ -715,14 +715,8 @@ fn u8_drag_1_20(
             })
             .inner;
         if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
-            club_badge(
-                ui,
-                &entry,
-                entry.baseline.first().copied().unwrap_or(0) as i64,
-                entry.current.first().copied().unwrap_or(0) as i64,
-                old as i64,
-                |d| d.to_string(),
-            );
+            let base = entry.baseline.first().copied().unwrap_or(0) as i64;
+            club_badge(ui, &entry, entry.user_delta, old as i64, base, |d| d.to_string());
         }
     });
     if enabled && changed {
@@ -828,7 +822,10 @@ mod tests {
             old_raw: vec![old],
             new_raw: vec![18],
             description: "unchanged".into(),
-            presentation: Some(crate::edit_history::EditPresentation::new(field, old, 18)),
+            presentation: Some(
+                crate::edit_history::EditPresentation::new(field, old, 18)
+                    .with_numeric_delta(18 - old as i64),
+            ),
         };
         let mut primary = make(0x20000, 12, "Youth Coaching");
         let mut mirror = make(0x30000, 9, "Youth Coaching (finance copy)");

@@ -2843,6 +2843,7 @@ mod edit_history_integration_tests {
                 before: "12".into(),
                 after: "15".into(),
                 group,
+            numeric_delta: None,
             }),
         }
     }

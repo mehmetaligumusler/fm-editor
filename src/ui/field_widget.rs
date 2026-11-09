@@ -131,37 +131,40 @@ fn render_out_of_range_label(ui: &mut egui::Ui, label: &str, raw_text: String, w
 fn intervention_badge(
     ui: &mut egui::Ui,
     entry: &crate::overlay::OverlayEntry,
-    baseline_displayed: i64,
-    current_displayed: i64,
+    user_delta: i64,
     live_displayed: i64,
+    baseline_displayed: i64,
     display: impl Fn(i64) -> String,
 ) {
-    let delta = current_displayed - baseline_displayed;
-    if delta == 0 {
+    if user_delta == 0 {
         return;
     }
-    let drift = live_displayed != baseline_displayed && live_displayed != current_displayed;
-    let (text, color) = if delta >= 0 {
+    // Natural development: whatever the game moved on its own, i.e. live
+    // value minus the user's cumulative intervention from the baseline.
+    let natural = live_displayed - baseline_displayed - user_delta;
+    let (text, color) = if user_delta >= 0 {
         (
-            format!("+{}", display(delta)),
+            format!("+{}", display(user_delta)),
             egui::Color32::from_rgb(70, 200, 110),
         )
     } else {
-        (display(delta), egui::Color32::from_rgb(240, 110, 100))
+        (display(user_delta), egui::Color32::from_rgb(240, 110, 100))
     };
     let arrow = '\u{2192}';
     let mut hover = format!(
-        "{} {} {} {}",
+        "{} {} {} {}\n{} {}",
         ui.tr("Original:"),
         display(baseline_displayed),
         arrow,
-        display(current_displayed),
+        display(live_displayed),
+        ui.tr("Your interventions:"),
+        display(user_delta),
     );
-    if drift {
+    if natural != 0 {
         hover.push_str(&format!(
             "\n{} {}",
-            ui.tr("Game value now (natural development):"),
-            display(live_displayed)
+            ui.tr("Natural development (by the game):"),
+            display(natural)
         ));
     }
     hover.push_str(&format!("\n{}", ui.tr("Click to undo this intervention.")));
@@ -233,25 +236,15 @@ pub fn attr_edit(
             VALUE_SIZE[0],
         );
         if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
-            // Encoded attributes store raw = displayed*5-2: deltas must be
-            // computed in DISPLAYED space or the badge shows wrong numbers
-            // (e.g. raw 26→28 is displayed 5→6, a +1, not raw's +2).
-            let decode = |b: u8| -> i64 {
-                let displayed = loc.decode_u8(b) as i64;
-                if displayed >= 1 {
-                    displayed
-                } else {
-                    // below-minimum sentinel bytes decode to 0; clamp to 1
-                    // so the baseline stays comparable.
-                    1
-                }
-            };
+            // The entry's user_delta is summed in DISPLAYED space (attr_edit
+            // tagged each submission with its decoded delta), so natural
+            // development never leaks into it.
             intervention_badge(
                 ui,
                 &entry,
-                decode(entry.baseline[0]),
-                decode(entry.current[0]),
-                decode(old_raw_byte),
+                entry.user_delta,
+                loc.decode_u8(old_raw_byte) as i64,
+                loc.decode_u8(entry.baseline[0]) as i64,
                 |d| d.to_string(),
             );
         }
@@ -271,7 +264,10 @@ pub fn attr_edit(
                 old_raw: vec![old_raw_byte],
                 new_raw: vec![new_raw_byte],
                 description: format!("{}: {} \u{2192} {}", label_tr, displayed, new_displayed),
-                presentation: Some(EditPresentation::new(label_tr, displayed, new_displayed)),
+                presentation: Some(
+                    EditPresentation::new(label_tr, displayed, new_displayed)
+                        .with_numeric_delta(new_displayed as i64 - displayed as i64),
+                ),
             });
         }
     }
@@ -365,7 +361,10 @@ fn attr_cell_compact_inner(
                 old_raw: vec![old_raw_byte],
                 new_raw: vec![new_raw_byte],
                 description: format!("{}: {} \u{2192} {}", label_tr, displayed, new_displayed),
-                presentation: Some(EditPresentation::new(label_tr, displayed, new_displayed)),
+                presentation: Some(
+                    EditPresentation::new(label_tr, displayed, new_displayed)
+                        .with_numeric_delta(new_displayed as i64 - displayed as i64),
+                ),
             });
         }
     }
@@ -565,7 +564,10 @@ pub fn raw_u8_edit(
                 old_raw: vec![old],
                 new_raw: vec![new_val],
                 description: format!("{}: {} \u{2192} {}", label_tr, old, new_val),
-                presentation: Some(EditPresentation::new(label_tr, old, new_val)),
+                presentation: Some(
+                    EditPresentation::new(label_tr, old, new_val)
+                        .with_numeric_delta(new_val as i64 - old as i64),
+                ),
             });
         }
     }
@@ -631,7 +633,10 @@ pub fn raw_u16_edit(
                 old_raw: old_bytes.to_vec(),
                 new_raw: new_bytes.to_vec(),
                 description: format!("{}: {} \u{2192} {}", label_tr, old_val, new_val),
-                presentation: Some(EditPresentation::new(label_tr, old_val, new_val)),
+                presentation: Some(
+                    EditPresentation::new(label_tr, old_val, new_val)
+                        .with_numeric_delta(new_val as i64 - old_val as i64),
+                ),
             });
         }
     }
@@ -706,14 +711,13 @@ pub fn raw_u32_edit(
         if money {
             if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
                 let factor = cur.factor() * period_factor;
-                let conv =
-                    |raw: &[u8]| -> i64 { (numeric_i64(raw) as f64 * factor).round() as i64 };
+                let live = (old_val as f64 * factor).round() as i64;
                 intervention_badge(
                     ui,
                     &entry,
-                    conv(&entry.baseline),
-                    conv(&entry.current),
-                    conv(&old_bytes),
+                    (entry.user_delta as f64 * factor).round() as i64,
+                    live,
+                    (numeric_i64(&entry.baseline) as f64 * factor).round() as i64,
                     |d| {
                         format!(
                             "{} {}",
@@ -727,9 +731,9 @@ pub fn raw_u32_edit(
             intervention_badge(
                 ui,
                 &entry,
-                numeric_i64(&entry.baseline),
-                numeric_i64(&entry.current),
+                entry.user_delta,
                 old_val as i64,
+                numeric_i64(&entry.baseline),
                 |d| d.to_string(),
             );
         }
@@ -746,11 +750,14 @@ pub fn raw_u32_edit(
                 old_raw: old_bytes.to_vec(),
                 new_raw: new_bytes.to_vec(),
                 description: format!("{}: {} \u{2192} {}", label_tr, old_val, new_val),
-                presentation: Some(EditPresentation::new(
-                    label_tr,
-                    money_value(label, old_val),
-                    money_value(label, new_val),
-                )),
+                presentation: Some(
+                    EditPresentation::new(
+                        label_tr,
+                        money_value(label, old_val),
+                        money_value(label, new_val),
+                    )
+                    .with_numeric_delta(new_val as i64 - old_val as i64),
+                ),
             });
         }
     }

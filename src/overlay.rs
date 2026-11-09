@@ -21,10 +21,16 @@ pub struct OverlayEntry {
     pub width: u8,
     /// Bytes before the user's first effective edit at this address.
     pub baseline: Vec<u8>,
-    /// Bytes currently in effect (newest effective edit's `new_raw`).
+    /// Bytes in effect after the newest effective edit (may differ from the
+    /// live bytes — players develop on their own).
     pub current: Vec<u8>,
-    /// Numeric delta `current - baseline` (little-endian, signed wrap-safe).
-    pub delta: i64,
+    /// Sum of the user's per-edit DISPLAYED deltas (attr_edit decodes
+    /// encoded attributes before differencing). Natural development never
+    /// enters this sum: only user submissions do.
+    pub user_delta: i64,
+    /// Telescoping raw delta `last_new - first_old` — for money fields
+    /// (raw is linear GBP) where the badge converts by the currency factor.
+    pub raw_delta: i64,
     /// Newest effective action touching this address — undoing it reverts
     /// the field to the previous state in the chain.
     pub action_id: ActionId,
@@ -82,42 +88,64 @@ pub fn build_overlay(
         })
         .collect();
     ordered.sort_by_key(|r| r.id);
-    let mut chains: HashMap<u64, (Vec<u8>, Option<(Vec<u8>, ActionId)>)> = HashMap::new();
+    // addr -> (baseline_raw, last_new_raw, user_delta_displayed, raw_delta,
+    // all_deltas_known, action_id)
+    let mut chains: HashMap<u64, (Vec<u8>, Vec<u8>, i64, i64, bool, ActionId)> = HashMap::new();
     for report in ordered {
+        // Only actions that took effect enter the chain: undone edits drop
+        // out (their payload was consumed), refused/unconfirmed never
+        // happened reliably.
+        if !effective(report.status) {
+            continue;
+        }
         for change in &report.changes {
             if change.old_raw.is_empty() || change.old_raw.len() != change.new_raw.len() {
                 continue;
             }
-            let entry = chains
-                .entry(change.address)
-                .or_insert_with(|| (change.old_raw.clone(), None));
-            if effective(report.status)
-                && change
-                    .attempts
-                    .iter()
-                    .any(|a| a.outcome == AttemptOutcome::Confirmed)
+            if !change
+                .attempts
+                .iter()
+                .any(|a| a.outcome == AttemptOutcome::Confirmed)
             {
-                entry.1 = Some((change.new_raw.clone(), report.id));
+                continue;
             }
+            let entry = chains.entry(change.address).or_insert_with(|| {
+                (
+                    change.old_raw.clone(),
+                    change.old_raw.clone(),
+                    0,
+                    0,
+                    true,
+                    report.id,
+                )
+            });
+            let step_raw = numeric(&change.new_raw) - numeric(&change.old_raw);
+            entry.3 += step_raw;
+            match change.numeric_delta {
+                Some(d) => entry.2 += d,
+                None => {
+                    entry.2 += step_raw;
+                    entry.4 = false;
+                }
+            }
+            entry.1 = change.new_raw.clone();
+            entry.5 = report.id;
         }
     }
     let mut out = HashMap::new();
-    for (addr, (baseline, current)) in chains {
-        let Some((current_bytes, action_id)) = current else {
-            continue;
-        };
-        let width = current_bytes.len() as u8;
-        let delta = numeric(&current_bytes) - numeric(&baseline);
-        if delta == 0 {
+    for (addr, (baseline, current, user_delta, raw_delta, _, action_id)) in chains {
+        if raw_delta == 0 && user_delta == 0 {
             continue;
         }
+        let width = current.len() as u8;
         out.insert(
             addr,
             OverlayEntry {
                 width,
                 baseline,
-                current: current_bytes,
-                delta,
+                current,
+                user_delta,
+                raw_delta,
                 action_id,
             },
         );
@@ -188,6 +216,7 @@ mod tests {
             address: addr,
             old_raw: vec![old],
             new_raw: vec![new],
+            numeric_delta: Some(new as i64 - old as i64),
             attempts: vec![AttemptReport {
                 operation: Operation::Apply,
                 started_at: SystemTime::now(),
@@ -228,7 +257,8 @@ mod tests {
         let e = map.get(&0x1000).unwrap();
         assert_eq!(e.baseline, vec![8]);
         assert_eq!(e.current, vec![14]);
-        assert_eq!(e.delta, 6);
+        assert_eq!(e.user_delta, 6);
+        assert_eq!(e.raw_delta, 6);
         assert_eq!(e.action_id, 2);
     }
 
@@ -241,7 +271,8 @@ mod tests {
         ];
         let map = build_overlay(&reports, VIEWING, None);
         let e = map.get(&0x1000).unwrap();
-        assert_eq!(e.delta, 2);
+        assert_eq!(e.user_delta, 2);
+        assert_eq!(e.raw_delta, 2);
         assert_eq!(e.baseline, vec![8]);
         assert_eq!(e.current, vec![10]);
     }
@@ -252,16 +283,30 @@ mod tests {
         let mut big = change(0x2000, 0, 0);
         big.old_raw = 1000u32.to_le_bytes().to_vec();
         big.new_raw = 800u32.to_le_bytes().to_vec();
+        // The producing widget tags the displayed delta (-200).
+        big.numeric_delta = Some(-200);
         let reports = vec![report(
             1,
             ActionStatus::Applied,
             vec![change(0x1000, 6, 3), big],
         )];
         let map = build_overlay(&reports, VIEWING, None);
-        assert_eq!(map.get(&0x1000).unwrap().delta, -3);
+        // Without numeric_delta tags the overlay falls back to the raw
+        // telescoping delta; with one, the displayed sum is used.
+        let mut tagged = reports.clone();
+        tagged[0].changes[0].numeric_delta = Some(-3);
+        assert_eq!(
+            build_overlay(&tagged, VIEWING, None)
+                .get(&0x1000)
+                .unwrap()
+                .user_delta,
+            -3
+        );
+        assert_eq!(map.get(&0x1000).unwrap().raw_delta, -3);
         let wide = map.get(&0x2000).unwrap();
         assert_eq!(wide.width, 4);
-        assert_eq!(wide.delta, -200);
+        assert_eq!(wide.raw_delta, -200);
+        assert_eq!(wide.user_delta, -200);
     }
 
     #[test]

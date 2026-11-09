@@ -679,6 +679,7 @@ mod tests {
             updated_at: time,
             status,
             changes: vec![ChangeReport {
+                numeric_delta: None,
                 field: "Current ability".into(),
                 before: "100".into(),
                 after: "120".into(),

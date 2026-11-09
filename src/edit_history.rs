@@ -70,6 +70,12 @@ pub struct EditPresentation {
     pub before: String,
     pub after: String,
     pub group: Option<EditGroup>,
+    /// Net change in DISPLAYED space for numeric fields (after - before),
+    /// so overlays can sum the user's interventions without re-deriving
+    /// them from raw bytes (encoded attributes store raw = f(displayed)).
+    /// None for non-numeric edits.
+    #[serde(default)]
+    pub numeric_delta: Option<i64>,
 }
 
 impl EditPresentation {
@@ -79,11 +85,18 @@ impl EditPresentation {
             before: before.to_string(),
             after: after.to_string(),
             group: None,
+            numeric_delta: None,
         }
     }
 
     pub fn in_group(mut self, group: EditGroup) -> Self {
         self.group = Some(group);
+        self
+    }
+
+    /// Tag a numeric edit with its displayed-space delta.
+    pub fn with_numeric_delta(mut self, delta: i64) -> Self {
+        self.numeric_delta = Some(delta);
         self
     }
 }
@@ -134,6 +147,10 @@ pub struct ChangeReport {
     pub address: u64,
     pub old_raw: Vec<u8>,
     pub new_raw: Vec<u8>,
+    /// Displayed-space delta from the producing widget (see
+    /// EditPresentation::numeric_delta); None for non-numeric edits.
+    #[serde(default)]
+    pub numeric_delta: Option<i64>,
     pub attempts: Vec<AttemptReport>,
 }
 
@@ -500,6 +517,7 @@ impl ChangeHistory {
                     address: entry.addr,
                     old_raw: entry.old_raw.clone(),
                     new_raw: entry.new_raw.clone(),
+                    numeric_delta: change.presentation.numeric_delta,
                     attempts: vec![new_attempt(Operation::Apply, now)],
                 });
                 let cmd = self
@@ -1239,6 +1257,7 @@ mod uncertainty_retention_tests {
                 address: 0x20000,
                 old_raw: vec![1],
                 new_raw: vec![2],
+                numeric_delta: None,
                 attempts: vec![],
             }],
             session_closed: None,
