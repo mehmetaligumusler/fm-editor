@@ -44,6 +44,19 @@ fn effective(status: ActionStatus) -> bool {
     )
 }
 
+/// Parse an integer from a change's displayed value ("14", "-1",
+/// "4,388,574 €", "12000 GBP/week" all work): digits, sign and thousands
+/// separators only. Legacy entries (saved before numeric_delta tagging)
+/// carry their displayed values here, letting the overlay compute their
+/// deltas without raw-byte guessing.
+fn parse_displayed(text: &str) -> Option<i64> {
+    let cleaned: String = text
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == '-')
+        .collect();
+    cleaned.parse::<i64>().ok()
+}
+
 /// Numeric little-endian value of `bytes`, sign-extended for width 1/2/4
 /// (wrapped through u64 so raw bit patterns stay faithful).
 fn numeric(bytes: &[u8]) -> i64 {
@@ -119,15 +132,23 @@ pub fn build_overlay(
                     report.id,
                 )
             });
-            let step_raw = numeric(&change.new_raw) - numeric(&change.old_raw);
-            entry.3 += step_raw;
-            match change.numeric_delta {
-                Some(d) => entry.2 += d,
-                None => {
-                    entry.2 += step_raw;
-                    entry.4 = false;
-                }
-            }
+            entry.3 += numeric(&change.new_raw) - numeric(&change.old_raw);
+            let step_displayed = match change.numeric_delta {
+                Some(d) => d,
+                None => match (
+                    parse_displayed(&change.before),
+                    parse_displayed(&change.after),
+                ) {
+                    (Some(before), Some(after)) => after - before,
+                    _ => {
+                        // Non-numeric edit (dates, names): no displayed
+                        // delta; the raw step keeps money badges working.
+                        entry.4 = false;
+                        numeric(&change.new_raw) - numeric(&change.old_raw)
+                    }
+                },
+            };
+            entry.2 += step_displayed;
             entry.1 = change.new_raw.clone();
             entry.5 = report.id;
         }
@@ -307,6 +328,18 @@ mod tests {
         assert_eq!(wide.width, 4);
         assert_eq!(wide.raw_delta, -200);
         assert_eq!(wide.user_delta, -200);
+    }
+
+    #[test]
+    fn legacy_entries_derive_displayed_deltas_from_before_after_strings() {
+        // Saved before numeric_delta tagging: only the displayed strings
+        // exist, and the delta must still come out right (14 -> 17 = +3).
+        let mut r = report(1, ActionStatus::Applied, vec![change(0x1000, 8, 14)]);
+        r.changes[0].numeric_delta = None;
+        r.changes[0].before = "14".into();
+        r.changes[0].after = "17".into();
+        let map = build_overlay(&[r], VIEWING, None);
+        assert_eq!(map.get(&0x1000).unwrap().user_delta, 3);
     }
 
     #[test]
