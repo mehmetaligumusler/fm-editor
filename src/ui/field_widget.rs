@@ -1,10 +1,11 @@
 //! Aligned profile field rows with colored numeric editors and attribute grids.
 
 use crate::edit_history::{EditGroup, EditPresentation};
+use crate::i18n::UiTr;
 use eframe::egui;
 
 use crate::fields::{Category, Encoding, Entity, Field};
-use crate::settings::{theme_data_id, Theme};
+use crate::settings::{Theme, theme_data_id};
 
 use super::navigation;
 
@@ -12,16 +13,15 @@ const VALUE_SIZE: [f32; 2] = [44.0, 22.0];
 
 /// A fixed label slot keeps profile values aligned without centering short labels.
 /// Truncated labels automatically show their full text on hover in egui.
-pub(crate) fn profile_label(
-    ui: &mut egui::Ui,
-    label: impl Into<egui::WidgetText>,
-) -> egui::Response {
+/// The label localises through the i18n table (FM's own game terms).
+pub(crate) fn profile_label(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let text = crate::i18n::tr(ui.ctx(), label);
     ui.allocate_ui_with_layout(
         egui::vec2(130.0, VALUE_SIZE[1]),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             ui.set_min_size(egui::vec2(130.0, VALUE_SIZE[1]));
-            ui.add(egui::Label::new(label).truncate())
+            ui.add(egui::Label::new(text).truncate())
         },
     )
     .inner
@@ -97,7 +97,7 @@ pub fn stub_checkbox(ui: &mut egui::Ui, label: &str, reason: &str) -> egui::Resp
 pub fn stub_field(ui: &mut egui::Ui, label: &str, reason: &str) {
     let grey = egui::Color32::from_rgb(110, 110, 110);
     let resp = ui.horizontal(|ui| {
-        profile_label(ui, egui::RichText::new(label).color(grey));
+        profile_label(ui, label);
         ui.add_sized(
             VALUE_SIZE,
             egui::Label::new(egui::RichText::new("—").color(grey)),
@@ -113,12 +113,82 @@ pub fn stub_field(ui: &mut egui::Ui, label: &str, reason: &str) {
 fn render_out_of_range_label(ui: &mut egui::Ui, label: &str, raw_text: String, width: f32) {
     let grey = egui::Color32::from_rgb(110, 110, 110);
     ui.horizontal(|ui| {
-        profile_label(ui, egui::RichText::new(label).color(grey));
+        profile_label(ui, label);
         ui.add_sized(
             [width.max(VALUE_SIZE[0]), VALUE_SIZE[1]],
             egui::Label::new(egui::RichText::new(raw_text).color(grey)),
         );
     });
+}
+
+/// Small colored net-delta badge (e.g. "+1") beside a value box, computed
+/// in DISPLAYED space (the caller passes decoded/converted numbers — raw
+/// bytes of encoded attributes differ from what the screen shows), with a
+/// hover text and a click-to-undo action. `live_displayed` is the value
+/// currently in game memory: players develop on their own, so the badge
+/// still shows the USER's intervention delta while the hover reports the
+/// game's own drift.
+fn intervention_badge(
+    ui: &mut egui::Ui,
+    entry: &crate::overlay::OverlayEntry,
+    user_delta: i64,
+    live_displayed: i64,
+    baseline_displayed: i64,
+    display: impl Fn(i64) -> String,
+) {
+    if user_delta == 0 {
+        return;
+    }
+    // Natural development: whatever the game moved on its own, i.e. live
+    // value minus the user's cumulative intervention from the baseline.
+    let natural = live_displayed - baseline_displayed - user_delta;
+    let (text, color) = if user_delta >= 0 {
+        (
+            format!("+{}", display(user_delta)),
+            egui::Color32::from_rgb(70, 200, 110),
+        )
+    } else {
+        (display(user_delta), egui::Color32::from_rgb(240, 110, 100))
+    };
+    let arrow = '\u{2192}';
+    let mut hover = format!(
+        "{} {} {} {}\n{} {}",
+        ui.tr("Original:"),
+        display(baseline_displayed),
+        arrow,
+        display(live_displayed),
+        ui.tr("Your interventions:"),
+        display(user_delta),
+    );
+    if natural != 0 {
+        hover.push_str(&format!(
+            "\n{} {}",
+            ui.tr("Natural development (by the game):"),
+            display(natural)
+        ));
+    }
+    hover.push_str(&format!("\n{}", ui.tr("Click to undo this intervention.")));
+    let response = ui.add(
+        egui::Label::new(egui::RichText::new(text).strong().color(color))
+            .sense(egui::Sense::click()),
+    );
+    if response.on_hover_text(hover).clicked() {
+        crate::overlay::request_undo_for(ui, entry);
+    }
+}
+
+/// Numeric display of raw bytes without the overlay's delta sign.
+pub fn numeric_i64(bytes: &[u8]) -> i64 {
+    let mut v: u64 = 0;
+    for (i, b) in bytes.iter().enumerate().take(8) {
+        v |= u64::from(*b) << (8 * i);
+    }
+    match bytes.len() {
+        1 => v as u8 as i64,
+        2 => v as u16 as i64,
+        4 => v as u32 as i64,
+        _ => v as i64,
+    }
 }
 
 /// Render one attribute: label + colored DragValue.
@@ -165,6 +235,19 @@ pub fn attr_edit(
                 .speed(0.1),
             VALUE_SIZE[0],
         );
+        if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
+            // The entry's user_delta is summed in DISPLAYED space (attr_edit
+            // tagged each submission with its decoded delta), so natural
+            // development never leaks into it.
+            intervention_badge(
+                ui,
+                &entry,
+                entry.user_delta,
+                loc.decode_u8(old_raw_byte) as i64,
+                loc.decode_u8(entry.baseline[0]) as i64,
+                |d| d.to_string(),
+            );
+        }
     });
 
     // Only emit an edit if the *displayed* value actually changed. This
@@ -175,12 +258,16 @@ pub fn attr_edit(
         if new_displayed != displayed {
             let new_raw_byte = loc.encode_u8(new_displayed);
             raw[offset] = new_raw_byte;
+            let label_tr = ui.tr(field.label);
             return Some(FieldEdit {
                 addr: entity_addr + offset as u64,
                 old_raw: vec![old_raw_byte],
                 new_raw: vec![new_raw_byte],
-                description: format!("{}: {} \u{2192} {}", field.label, displayed, new_displayed),
-                presentation: Some(EditPresentation::new(field.label, displayed, new_displayed)),
+                description: format!("{}: {} \u{2192} {}", label_tr, displayed, new_displayed),
+                presentation: Some(
+                    EditPresentation::new(label_tr, displayed, new_displayed)
+                        .with_numeric_delta(new_displayed as i64 - displayed as i64),
+                ),
             });
         }
     }
@@ -230,7 +317,7 @@ fn attr_cell_compact_inner(
             ui.set_width(56.0);
             ui.vertical_centered(|ui| {
                 if labelled {
-                    ui.label(egui::RichText::new(field.label).color(grey));
+                    ui.label(egui::RichText::new(ui.tr(field.label)).color(grey));
                 }
                 ui.add_sized(
                     VALUE_SIZE,
@@ -249,7 +336,7 @@ fn attr_cell_compact_inner(
         ui.set_width(56.0);
         ui.vertical_centered(|ui| {
             if labelled {
-                ui.label(field.label);
+                ui.label(ui.tr(field.label));
             }
             ui.visuals_mut().override_text_color = Some(color);
             changed = number_edit(
@@ -268,12 +355,16 @@ fn attr_cell_compact_inner(
         if new_displayed != displayed {
             let new_raw_byte = loc.encode_u8(new_displayed);
             raw[offset] = new_raw_byte;
+            let label_tr = ui.tr(field.label);
             return Some(FieldEdit {
                 addr: entity_addr + offset as u64,
                 old_raw: vec![old_raw_byte],
                 new_raw: vec![new_raw_byte],
-                description: format!("{}: {} \u{2192} {}", field.label, displayed, new_displayed),
-                presentation: Some(EditPresentation::new(field.label, displayed, new_displayed)),
+                description: format!("{}: {} \u{2192} {}", label_tr, displayed, new_displayed),
+                presentation: Some(
+                    EditPresentation::new(label_tr, displayed, new_displayed)
+                        .with_numeric_delta(new_displayed as i64 - displayed as i64),
+                ),
             });
         }
     }
@@ -293,9 +384,62 @@ pub fn category_column(
     entity_addr: u64,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong(heading);
+    category_column_ex(
+        schemas,
+        ui,
+        heading,
+        entity,
+        category,
+        raw,
+        entity_addr,
+        edits,
+        &[],
+        &[],
+    );
+}
+
+/// `category_column` plus per-player context: `extra_keys` are appended to the
+/// category's fields (FM shows First Touch and Passing inside the Goalkeeping
+/// block for goalkeepers) and `skip_keys` are removed from it (the same two
+/// leave the Technical block for goalkeepers). Everything re-sorts by the
+/// localized label, reproducing the game's on-screen order. An empty result
+/// renders nothing at all — no orphan heading (FM24's set-piece fields moved
+/// into Technical, leaving that category empty on this build).
+pub fn category_column_ex(
+    schemas: &'static crate::fields::VersionedSchemas,
+    ui: &mut egui::Ui,
+    heading: &str,
+    entity: Entity,
+    category: Category,
+    raw: &mut [u8],
+    entity_addr: u64,
+    edits: &mut Vec<FieldEdit>,
+    extra_keys: &[&str],
+    skip_keys: &[&str],
+) {
+    let ctx = ui.ctx().clone();
+    let mut fields: Vec<Field> = schemas
+        .fields_for_category(entity, category)
+        .into_iter()
+        .filter(|f| !skip_keys.iter().any(|k| *k == f.key))
+        .collect();
+    for key in extra_keys {
+        if let Some(f) = schemas.field(key).filter(|f| f.entity == entity) {
+            if !fields.iter().any(|e| e.key == f.key) {
+                fields.push(f.clone());
+            }
+        }
+    }
+    if fields.is_empty() {
+        return;
+    }
+    ui.strong(ui.tr(heading));
     ui.add_space(6.0);
-    let fields = schemas.fields_for_category(entity, category);
+    // FM's own screens list attributes alphabetically by the localized name;
+    // the schema order is discovery order. Sort per language so the editor
+    // matches the game's on-screen order exactly (Turkish alphabetical under
+    // Türkçe, English alphabetical under English).
+    fields.sort_by_cached_key(|f| crate::i18n::turkish_sort_key(&crate::i18n::tr(&ctx, f.label)));
     for f in &fields {
         if let Some(edit) = render_field(ui, f, raw, entity_addr) {
             edits.push(edit);
@@ -317,7 +461,7 @@ pub fn roles_column(
     roles: &[u8; 15],
     skip_zeros: bool,
 ) {
-    ui.strong(heading);
+    ui.strong(ui.tr(heading));
     ui.add_space(6.0);
     let role_fields = schemas.fields_for_category(Entity::Staff, Category::StaffRole);
     egui::Grid::new(heading)
@@ -398,18 +542,32 @@ pub fn raw_u8_edit(
                 .speed(0.5),
             VALUE_SIZE[0],
         );
+        if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
+            intervention_badge(
+                ui,
+                &entry,
+                numeric_i64(&entry.baseline),
+                numeric_i64(&entry.current),
+                old as i64,
+                |d| d.to_string(),
+            );
+        }
     });
 
     if changed {
         let new_val = val.clamp(0, max as i32) as u8;
         if new_val != old {
             raw[offset] = new_val;
+            let label_tr = ui.tr(label);
             return Some(FieldEdit {
                 addr: entity_addr + offset as u64,
                 old_raw: vec![old],
                 new_raw: vec![new_val],
-                description: format!("{}: {} \u{2192} {}", label, old, new_val),
-                presentation: Some(EditPresentation::new(label, old, new_val)),
+                description: format!("{}: {} \u{2192} {}", label_tr, old, new_val),
+                presentation: Some(
+                    EditPresentation::new(label_tr, old, new_val)
+                        .with_numeric_delta(new_val as i64 - old as i64),
+                ),
             });
         }
     }
@@ -451,6 +609,16 @@ pub fn raw_u16_edit(
                 .speed(1.0),
             50.0,
         );
+        if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
+            intervention_badge(
+                ui,
+                &entry,
+                numeric_i64(&entry.baseline),
+                numeric_i64(&entry.current),
+                old_val as i64,
+                |d| d.to_string(),
+            );
+        }
     });
 
     if changed {
@@ -459,12 +627,16 @@ pub fn raw_u16_edit(
             let new_bytes = new_val.to_le_bytes();
             raw[offset] = new_bytes[0];
             raw[offset + 1] = new_bytes[1];
+            let label_tr = ui.tr(label);
             return Some(FieldEdit {
                 addr: entity_addr + offset as u64,
                 old_raw: old_bytes.to_vec(),
                 new_raw: new_bytes.to_vec(),
-                description: format!("{}: {} \u{2192} {}", label, old_val, new_val),
-                presentation: Some(EditPresentation::new(label, old_val, new_val)),
+                description: format!("{}: {} \u{2192} {}", label_tr, old_val, new_val),
+                presentation: Some(
+                    EditPresentation::new(label_tr, old_val, new_val)
+                        .with_numeric_delta(new_val as i64 - old_val as i64),
+                ),
             });
         }
     }
@@ -493,17 +665,78 @@ pub fn raw_u32_edit(
     let old_val = u32::from_le_bytes(old_bytes);
     let mut val = old_val as i64;
     let mut changed = false;
+    let cur = crate::i18n::currency(ui.ctx());
+    let money = is_money_label(label);
+    // Wages convert to the selected period (×52 yearly, ×4.333 monthly);
+    // other money converts to the selected currency only.
+    let period_factor = if money && is_wage_label(label) {
+        crate::i18n::wage_period(ui.ctx()).factor()
+    } else {
+        1.0
+    };
+    let factor = if money {
+        cur.factor() * period_factor
+    } else {
+        1.0
+    };
+    let suffix = if money {
+        let period = if is_wage_label(label) {
+            crate::i18n::wage_suffix(
+                crate::i18n::wage_period(ui.ctx()),
+                crate::i18n::language(ui.ctx()),
+            )
+        } else {
+            ""
+        };
+        format!(" {}{}", cur.symbol(), period)
+    } else {
+        String::new()
+    };
 
     ui.horizontal(|ui| {
         profile_label(ui, label);
-        changed = number_edit(
-            ui,
-            egui::DragValue::new(&mut val)
-                .update_while_editing(false)
-                .range(0..=u32::MAX as i64)
-                .speed(100.0),
-            70.0,
-        );
+        let mut drag = egui::DragValue::new(&mut val)
+            .update_while_editing(false)
+            .range(0..=u32::MAX as i64)
+            .speed(100.0);
+        if money {
+            drag = drag
+                .custom_formatter(crate::i18n::money_drag_formatter(factor))
+                .custom_parser(crate::i18n::money_drag_parser(factor));
+        }
+        changed = number_edit(ui, drag, 90.0);
+        if money {
+            ui.weak(&suffix);
+        }
+        if money {
+            if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
+                let factor = cur.factor() * period_factor;
+                let live = (old_val as f64 * factor).round() as i64;
+                intervention_badge(
+                    ui,
+                    &entry,
+                    (entry.user_delta as f64 * factor).round() as i64,
+                    live,
+                    (numeric_i64(&entry.baseline) as f64 * factor).round() as i64,
+                    |d| {
+                        format!(
+                            "{} {}",
+                            crate::i18n::thousands(d.unsigned_abs() as u64),
+                            cur.symbol()
+                        )
+                    },
+                );
+            }
+        } else if let Some(entry) = crate::overlay::lookup(ui, entity_addr + offset as u64) {
+            intervention_badge(
+                ui,
+                &entry,
+                entry.user_delta,
+                old_val as i64,
+                numeric_i64(&entry.baseline),
+                |d| d.to_string(),
+            );
+        }
     });
 
     if changed {
@@ -511,16 +744,20 @@ pub fn raw_u32_edit(
         if new_val != old_val {
             let new_bytes = new_val.to_le_bytes();
             raw[offset..offset + 4].copy_from_slice(&new_bytes);
+            let label_tr = ui.tr(label);
             return Some(FieldEdit {
                 addr: entity_addr + offset as u64,
                 old_raw: old_bytes.to_vec(),
                 new_raw: new_bytes.to_vec(),
-                description: format!("{}: {} \u{2192} {}", label, old_val, new_val),
-                presentation: Some(EditPresentation::new(
-                    label,
-                    money_value(label, old_val),
-                    money_value(label, new_val),
-                )),
+                description: format!("{}: {} \u{2192} {}", label_tr, old_val, new_val),
+                presentation: Some(
+                    EditPresentation::new(
+                        label_tr,
+                        money_value(label, old_val),
+                        money_value(label, new_val),
+                    )
+                    .with_numeric_delta(new_val as i64 - old_val as i64),
+                ),
             });
         }
     }
@@ -754,7 +991,7 @@ fn calendar_button(
     years: &std::ops::RangeInclusive<u16>,
 ) -> Option<(u16, i32, i32)> {
     let enabled = navigation::editing_enabled(ui) && ui.is_enabled();
-    let button = ui.add_enabled(enabled, egui::Button::new("Calendar"));
+    let button = ui.add_enabled(enabled, egui::Button::new(ui.tr("Calendar")));
     if !enabled {
         if ui.memory(|memory| memory.is_popup_open(id)) {
             ui.memory_mut(|memory| memory.close_popup());
@@ -956,7 +1193,7 @@ fn date_edit_inner(
     let id = calendar_id(entity_addr, doy_offset);
     ui.push_id(id, |ui| {
         ui.horizontal_wrapped(|ui| {
-            ui.label(label);
+            ui.label(ui.tr(label));
             let day_changed = number_edit(
                 ui,
                 egui::DragValue::new(&mut day)
@@ -1067,12 +1304,12 @@ pub fn choice_u8_edit(
         profile_label(ui, label);
         ui.add_enabled_ui(enabled, |ui| {
             egui::ComboBox::from_id_salt(("choice_u8", label, base_addr, offset))
-                .selected_text(old_name)
+                .selected_text(ui.tr(old_name))
                 .width(ui.available_width().min(160.0).max(0.0))
                 .wrap_mode(egui::TextWrapMode::Truncate)
                 .show_ui(ui, |ui| {
                     for &(code, name) in options {
-                        ui.selectable_value(&mut new, code, name);
+                        ui.selectable_value(&mut new, code, &ui.tr(name));
                     }
                 });
         });
@@ -1089,8 +1326,17 @@ pub fn choice_u8_edit(
         addr: base_addr + offset as u64,
         old_raw: vec![old],
         new_raw: vec![new],
-        description: format!("{label}: {old_name} \u{2192} {new_name}"),
-        presentation: Some(EditPresentation::new(label, old_name, new_name)),
+        description: format!(
+            "{}: {} \u{2192} {}",
+            ui.tr(label),
+            ui.tr(old_name),
+            ui.tr(new_name)
+        ),
+        presentation: Some(EditPresentation::new(
+            ui.tr(label),
+            ui.tr(old_name),
+            ui.tr(new_name),
+        )),
     })
 }
 
@@ -1247,6 +1493,25 @@ pub fn money_edit_at(
     })
 }
 
+/// Labels whose values are money in memory (internal GBP) and therefore get
+/// the display-currency conversion and thousands separators on their drags.
+pub(super) fn is_money_label(label: &str) -> bool {
+    let l = label.to_ascii_lowercase();
+    l.contains("wage")
+        || l.contains("budget")
+        || l.contains("balance")
+        || l.contains("(p/w)")
+        || l.contains("ticket")
+        || l.contains("price")
+        || l.contains("value")
+}
+
+/// Labels whose values are per-week wages: their drags also show the
+/// selected wage period suffix (/hafta, /ay, /yıl).
+pub(super) fn is_wage_label(label: &str) -> bool {
+    label.to_ascii_lowercase().contains("wage")
+}
+
 /// Memory money values are GBP, irrespective of the display currency/period.
 pub(super) fn money_value(label: &str, value: impl std::fmt::Display) -> String {
     let unit = if label.to_ascii_lowercase().contains("wage") || label.contains("(p/w)") {
@@ -1359,15 +1624,17 @@ mod tests {
         let output = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let response = ui.allocate_ui(egui::vec2(250.0, 0.0), |ui| {
-                    assert!(choice_u8_edit(
-                        ui,
-                        "Ethnicity",
-                        &mut raw,
-                        &f,
-                        0x20000,
-                        &[(1, "Mediterranean/Hispanic")]
-                    )
-                    .is_none());
+                    assert!(
+                        choice_u8_edit(
+                            ui,
+                            "Ethnicity",
+                            &mut raw,
+                            &f,
+                            0x20000,
+                            &[(1, "Mediterranean/Hispanic")]
+                        )
+                        .is_none()
+                    );
                 });
                 assert!(
                     response.response.rect.width() <= 250.5,
@@ -1634,6 +1901,71 @@ mod tests {
         (output, edits)
     }
 
+    #[test]
+    fn goalkeeper_column_merges_first_touch_and_passing_in_game_order() {
+        let ctx = egui::Context::default();
+        crate::i18n::set_language(&ctx, crate::i18n::Language::Turkish);
+        let schemas = crate::game_version::GameBuild::Fm24Epic.schemas();
+        let mut raw = vec![0u8; schemas.player_struct_size];
+        let mut edits = Vec::new();
+        let output = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                category_column_ex(
+                    schemas,
+                    ui,
+                    "Goalkeeping",
+                    crate::fields::Entity::Player,
+                    crate::fields::Category::Goalkeeping,
+                    &mut raw,
+                    0,
+                    &mut edits,
+                    &["first_touch", "passing"],
+                    &[],
+                );
+            });
+        });
+        let mut labels: Vec<String> = text_shapes(&output.shapes)
+            .iter()
+            .map(|s| s.galley.text().to_owned())
+            .collect();
+        // Drop the numeric value boxes; keep attribute labels only.
+        labels.retain(|t| {
+            !t.trim().is_empty() && t.chars().next().is_some_and(|c| !c.is_ascii_digit())
+        });
+        let expected = [
+            "Ani Çıkış Eğilimi",
+            "Birebir",
+            "Bölge Hakimiyeti",
+            "Degaj",
+            "Eksantriklik",
+            "Elle Kontrol",
+            "Elle Oyun Başlatma",
+            "Hava Topları",
+            "İletişim",
+            "İlk Kontrol",
+            "Pas",
+            "Refleksler",
+            "Yumrukla Uzaklaştırma",
+        ];
+        for name in expected {
+            let pos = labels
+                .iter()
+                .position(|t| t.trim() == name)
+                .unwrap_or_else(|| panic!("missing {name} in {labels:?}"));
+            assert_eq!(
+                &labels.remove(pos),
+                &name.to_string(),
+                "order mismatch; remaining: {labels:?}"
+            );
+        }
+        assert!(
+            labels
+                .iter()
+                .all(|t| t.trim() == "1" || t.trim() == "Kalecilik"),
+            "only the heading and value boxes may remain: {labels:?}"
+        );
+    }
+
     fn click_text(output: &egui::FullOutput, text: &str) -> Vec<egui::Event> {
         let texts = text_shapes(&output.shapes);
         let shape = texts
@@ -1719,9 +2051,11 @@ mod tests {
         let (output, _) = date_frame(&ctx, &mut raw, 100, true, vec![]);
         date_frame(&ctx, &mut raw, 100, true, click_text(&output, "Calendar"));
         let (output, _) = date_frame(&ctx, &mut raw, 100, true, vec![]);
-        assert!(text_shapes(&output.shapes)
-            .iter()
-            .any(|s| s.galley.text() == "[1]"));
+        assert!(
+            text_shapes(&output.shapes)
+                .iter()
+                .any(|s| s.galley.text() == "[1]")
+        );
         let (_, edits) = date_frame(&ctx, &mut raw, 100, true, click_text(&output, "2"));
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].addr, 100);
@@ -1754,9 +2088,10 @@ mod tests {
             let (_, edits) = date_frame(&ctx, &mut raw, 200, ancestor, vec![]);
             assert!(edits.is_empty());
             assert_eq!(raw, original);
-            assert!(ctx
-                .data_mut(|d| d.get_temp::<CalendarDraft>(calendar_id(200, 0)))
-                .is_none());
+            assert!(
+                ctx.data_mut(|d| d.get_temp::<CalendarDraft>(calendar_id(200, 0)))
+                    .is_none()
+            );
             let (_, edits) = date_frame(&ctx, &mut raw, 100, ancestor, vec![]);
             assert!(edits.is_empty());
             if !editing || !ancestor {
@@ -1773,9 +2108,11 @@ mod tests {
             let (output, edits) = date_frame(&ctx, &mut raw, 100, true, vec![]);
             assert!(edits.is_empty());
             assert_eq!(raw, original);
-            assert!(!text_shapes(&output.shapes)
-                .iter()
-                .any(|s| s.galley.text() == "Calendar"));
+            assert!(
+                !text_shapes(&output.shapes)
+                    .iter()
+                    .any(|s| s.galley.text() == "Calendar")
+            );
         }
     }
 
@@ -2138,14 +2475,10 @@ mod tests {
                         assert!(
                             raw_u32_edit(ui, &field(Encoding::RawU32, 0), &mut raw, 0).is_none()
                         );
-                        assert!(ca_pa_edit(
-                            ui,
-                            &mut raw,
-                            &attribute,
-                            &field(Encoding::Direct, 1),
-                            0
-                        )
-                        .is_empty());
+                        assert!(
+                            ca_pa_edit(ui, &mut raw, &attribute, &field(Encoding::Direct, 1), 0)
+                                .is_empty()
+                        );
                         assert!(
                             dob_edit(ui, &mut dob, &field(Encoding::DateDayYear, 0), 0).is_empty()
                         );

@@ -11,11 +11,11 @@
 //! of Steamworks), so its module hash and module-relative RVAs can differ
 //! even when the struct layouts match.
 //!
-//! Detection is automatic: FM24, FM26 and FM27 all run as `fm.exe`.
-//! `process::running_games()` reads the game module's PE product metadata,
-//! falling back to the install directory if no FM identity is available.
-//! Storefront hints are separate; identifying a release does not verify its
-//! offsets. Attachment retains the per-schema module fingerprint gate.
+//! Detection is automatic: FM24, FM26 and FM27 all run as `fm.exe`, so
+//! `process::running_games()` lists them and reads each one's on-disk
+//! module path — the install directory always contains the release year,
+//! and a Game Pass install is recognisable by its install location — to
+//! determine which build, and so which schema, it uses.
 //!
 //! Adding a build (e.g. FM26 on Game Pass) is a new `GameBuild` variant,
 //! its arms in the `GameBuild` matches, and its schema static under
@@ -61,15 +61,14 @@ impl GameVersion {
     }
 }
 
-/// Where a game install came from. Recognised Epic installs have no schema
-/// yet and are rejected; locations not recognised as Game Pass or Epic retain
-/// the historical Steam default, subject to the schema's fingerprint gate.
+/// Where a game install came from. Epic and Game Pass are resolved separately
+/// from Steam; an unknown storefront retains the historical Steam fallback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Storefront {
     Steam,
     /// PC Game Pass / Microsoft Store (Xbox app) install.
     GamePass,
-    /// Epic Games Store; identified but no verified schema is available yet.
+    /// Epic Games Store; FM24 verified for editing on 2026-11-07.
     Epic,
 }
 
@@ -79,7 +78,7 @@ impl Storefront {
         match self {
             Storefront::Steam => "Steam",
             Storefront::GamePass => "Game Pass",
-            Storefront::Epic => "Epic",
+            Storefront::Epic => "Epic Games",
         }
     }
 }
@@ -87,9 +86,10 @@ impl Storefront {
 /// A release as shipped by one storefront — the unit a schema is selected
 /// for. Only builds with a schema exist as variants, so a `GameBuild` always
 /// has one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GameBuild {
     Fm24Steam,
+    Fm24Epic,
     Fm26Steam,
     Fm27Steam,
     /// Starts as a copy of the FM27 Steam schema; nothing in it has been
@@ -99,8 +99,9 @@ pub enum GameBuild {
 
 impl GameBuild {
     /// Every build with a schema.
-    pub const ALL: [GameBuild; 4] = [
+    pub const ALL: [GameBuild; 5] = [
         GameBuild::Fm24Steam,
+        GameBuild::Fm24Epic,
         GameBuild::Fm26Steam,
         GameBuild::Fm27Steam,
         GameBuild::Fm27GamePass,
@@ -124,7 +125,7 @@ impl GameBuild {
 
     pub fn version(self) -> GameVersion {
         match self {
-            GameBuild::Fm24Steam => GameVersion::Fm24,
+            GameBuild::Fm24Steam | GameBuild::Fm24Epic => GameVersion::Fm24,
             GameBuild::Fm26Steam => GameVersion::Fm26,
             GameBuild::Fm27Steam | GameBuild::Fm27GamePass => GameVersion::Fm27,
         }
@@ -134,13 +135,24 @@ impl GameBuild {
         match self {
             GameBuild::Fm24Steam | GameBuild::Fm26Steam | GameBuild::Fm27Steam => Storefront::Steam,
             GameBuild::Fm27GamePass => Storefront::GamePass,
+            GameBuild::Fm24Epic => Storefront::Epic,
         }
+    }
+
+    /// Every schema-backed build allows writes. FM24 Epic was unlocked after
+    /// attended live write/Undo witnesses on 2026-11-07 — player attribute
+    /// and club transfer budget round-trips rendered correctly in game
+    /// (docs/fm24/epic-preview.md). Untested Epic fields remain
+    /// Steam-inherited mappings.
+    pub fn allows_writes(self) -> bool {
+        true
     }
 
     /// The per-build schema bundle (field lists, RVAs, sizes).
     pub fn schemas(self) -> &'static VersionedSchemas {
         match self {
             GameBuild::Fm24Steam => &fm24::FM24,
+            GameBuild::Fm24Epic => &fm24::FM24_EPIC,
             GameBuild::Fm26Steam => &fm26::FM26,
             GameBuild::Fm27Steam => &fm27::FM27,
             GameBuild::Fm27GamePass => &fm27::FM27_GAMEPASS,
@@ -152,6 +164,7 @@ impl GameBuild {
     pub fn schema_name(self) -> &'static str {
         match self {
             GameBuild::Fm24Steam => "FM24",
+            GameBuild::Fm24Epic => "FM24_EPIC",
             GameBuild::Fm26Steam => "FM26",
             GameBuild::Fm27Steam => "FM27",
             GameBuild::Fm27GamePass => "FM27_GAMEPASS",
@@ -164,6 +177,7 @@ impl GameBuild {
     pub fn display_name(self) -> &'static str {
         match self {
             GameBuild::Fm27GamePass => "FM27 Game Pass",
+            GameBuild::Fm24Epic => "FM24",
             other => other.version().display_name(),
         }
     }
@@ -187,13 +201,6 @@ mod tests {
     fn resolve_rejects_unmapped_storefront() {
         let err = GameBuild::resolve(GameVersion::Fm26, Storefront::GamePass).unwrap_err();
         assert!(err.contains("Game Pass") && err.contains("FM26"), "{err}");
-        for version in [GameVersion::Fm24, GameVersion::Fm26, GameVersion::Fm27] {
-            let err = GameBuild::resolve(version, Storefront::Epic).unwrap_err();
-            assert!(
-                err.contains("Epic") && err.contains(version.display_name()),
-                "{err}"
-            );
-        }
     }
 
     #[test]
@@ -202,6 +209,25 @@ mod tests {
             for b in &GameBuild::ALL[i + 1..] {
                 assert!(!std::ptr::eq(a.schemas(), b.schemas()), "{a:?} / {b:?}");
             }
+        }
+    }
+
+    #[test]
+    fn epic_resolves_separately_from_steam_with_distinct_fingerprint() {
+        let epic = GameBuild::resolve(GameVersion::Fm24, Storefront::Epic).unwrap();
+        assert_eq!(epic, GameBuild::Fm24Epic);
+        assert!(GameBuild::resolve(GameVersion::Fm26, Storefront::Epic).is_err());
+        assert_ne!(
+            epic.schemas().known_dll_hash,
+            GameBuild::Fm24Steam.schemas().known_dll_hash
+        );
+        assert_ne!(epic.schemas().known_dll_hash, 0);
+    }
+
+    #[test]
+    fn every_build_allows_writes_after_epic_verification() {
+        for build in GameBuild::ALL {
+            assert!(build.allows_writes(), "{build:?}");
         }
     }
 }

@@ -102,6 +102,19 @@ fn counts_tuple(ac: &ArrayCache) -> (usize, usize, usize) {
     (ac.humans_count, ac.staff_count, ac.clubs_count)
 }
 
+/// The remembered save name when `identity` still matches the save it was
+/// found for. Empty identities never match — a save whose club objects
+/// could not be read has no reusable name.
+fn cached_save_name(identity: &[u64], cache: &Option<(Vec<u64>, String)>) -> Option<String> {
+    if identity.is_empty() {
+        return None;
+    }
+    cache
+        .as_ref()
+        .filter(|(id, _)| id.as_slice() == identity)
+        .map(|(_, name)| name.clone())
+}
+
 fn entity_counts(ac: &ArrayCache) -> EntityCounts {
     EntityCounts {
         players: ac.humans_count,
@@ -176,6 +189,10 @@ pub(super) fn worker_loop(
     // consecutive probes report the same plausible counts — rejects the
     // save-creation window where counts drift as FM populates the world.
     let mut last_counts: Option<(usize, usize, usize)> = None;
+    // Remembered (save identity, save name) so reconnects to the same
+    // loaded save reuse the name without a fresh full-heap scan. Keyed by
+    // identity, so a different save can never inherit a stale name.
+    let mut save_name_cache: Option<(Vec<u64>, String)> = None;
 
     while let Ok(cmd) = rx.recv() {
         match cmd {
@@ -213,9 +230,31 @@ pub(super) fn worker_loop(
                         };
                         cache = None;
                         fm = Some(process);
+                        // Reply first — the save-name scan reads the whole
+                        // heap and must not delay the attach or later Pings.
                         let _ = tx.send(BridgeResult::Attached(pid, build, game_date));
                         if let Some(msg) = notice {
                             let _ = tx.send(BridgeResult::Error(msg));
+                        }
+                        // Re-attach to a game whose save is already loaded:
+                        // surface the name right away, reusing the remembered
+                        // one when the save identity still matches.
+                        if counts_are_plausible(&ac) {
+                            let save_name =
+                                match cached_save_name(&ac.save_identity, &save_name_cache) {
+                                    Some(name) => Some(name),
+                                    None => {
+                                        let name = fm
+                                            .as_ref()
+                                            .and_then(crate::save_name::detect_save_name);
+                                        if let Some(n) = &name {
+                                            save_name_cache =
+                                                Some((ac.save_identity.clone(), n.clone()));
+                                        }
+                                        name
+                                    }
+                                };
+                            let _ = tx.send(BridgeResult::SaveName(pid, save_name));
                         }
                     }
                     Err(e) => {
@@ -390,9 +429,18 @@ pub(super) fn worker_loop(
                                 // Two consecutive stable probes → save ready.
                                 // Auto-trigger human manager + entity cache load.
                                 let counts = entity_counts(&current);
+                                let identity = current.save_identity.clone();
                                 cache = Some(current);
+                                // Reply before any scanning so the entity
+                                // loads below start immediately; the save
+                                // name follows as SaveName.
                                 let _ =
                                     tx.send(BridgeResult::Connected(pid, counts, f.game_date()));
+                                let cached = cached_save_name(&identity, &save_name_cache);
+                                if let Some(name) = &cached {
+                                    let _ =
+                                        tx.send(BridgeResult::SaveName(pid, Some(name.clone())));
+                                }
                                 // Human manager (fast, goes first)
                                 if let (Some(f2), Some(_)) = (&fm, &cache) {
                                     match entity_load::load_human_manager(f2) {
@@ -414,6 +462,15 @@ pub(super) fn worker_loop(
                                             let _ = tx.send(BridgeResult::CacheFailed(e));
                                         }
                                     }
+                                }
+                                // Name not remembered: full-heap scan, after
+                                // the entity loads so the UI populates first.
+                                if cached.is_none() {
+                                    let name = crate::save_name::detect_save_name(f);
+                                    if let Some(n) = &name {
+                                        save_name_cache = Some((identity, n.clone()));
+                                    }
+                                    let _ = tx.send(BridgeResult::SaveName(pid, name));
                                 }
                             }
                             PingTransition::SaveUnloaded => {

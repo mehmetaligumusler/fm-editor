@@ -403,6 +403,7 @@ mod tests {
             staff: vec![],
             clubs: vec![],
             club_names: Default::default(),
+            injuries: Default::default(),
             my_clubs: Some(crate::cache::MyClubs {
                 club_ids: HashSet::from([42, 43]),
                 label: "Club + B".into(),

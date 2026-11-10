@@ -1,5 +1,10 @@
 # FM24 Memory Layout
 
+The separate [Epic build notes](epic-preview.md) record Windows Epic build
+detection, array-root observations, the fingerprint, and the 2026-11-07 live
+write/Undo witnesses. Steam-only field witnesses below are still inherited,
+not independently verified on Epic.
+
 Mapped 2026-10-22 against a fresh FM24 save (day 0, 3 Jul 2023) under Proton.
 The code is the source of truth (`src/fields/fm24/`); this file holds the
 discovery context, witnesses and what is still unmapped.

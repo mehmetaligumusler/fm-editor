@@ -56,6 +56,7 @@ pub static FM26: VersionedSchemas = VersionedSchemas {
     staff_sub_records: STAFF_SUB_RECORDS,
     club_sub_records: CLUB_SUB_RECORDS,
     stadium_sub_records: &[],
+    injury_layout: None,
     player_lists: None,
     morale_labels: &[],
     person_profile: None,

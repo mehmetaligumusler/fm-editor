@@ -614,7 +614,11 @@ fn label_or_code(table: &[(u8, &'static str)], code: u8, prefix: &str) -> String
         .find(|&&(known, _)| known == code)
         .map(|&(_, label)| label.to_owned())
         .unwrap_or_else(|| {
-            if prefix.ends_with('#') { format!("{prefix}{code}") } else { format!("{prefix} {code}") }
+            if prefix.ends_with('#') {
+                format!("{prefix}{code}")
+            } else {
+                format!("{prefix} {code}")
+            }
         })
 }
 
@@ -643,6 +647,8 @@ pub struct VersionedSchemas {
 
     /// None when this build's player lists have not been mapped.
     pub player_lists: Option<&'static PlayerListLayout>,
+    /// None when this build's active-injury chain has not been mapped.
+    pub injury_layout: Option<&'static crate::injury::InjuryLayout>,
     /// Only independently witnessed morale levels have labels.
     pub morale_labels: &'static [(u8, &'static str)],
     /// None when this build's person-profile data (languages, licence,
@@ -809,6 +815,9 @@ mod schema_lookup_tests {
     fn current_date_rva_is_specific_to_the_verified_build() {
         assert_eq!(GameBuild::Fm27Steam.schemas().rva_current_date, 0x56AD378);
         assert_eq!(GameBuild::Fm24Steam.schemas().rva_current_date, 0x631D5BC);
+        // Epic witnessed 2026-11-08 against the user's live career (21 June
+        // 2026 held stably at module+0x642F458).
+        assert_eq!(GameBuild::Fm24Epic.schemas().rva_current_date, 0x642F458);
         for build in [GameBuild::Fm27GamePass, GameBuild::Fm26Steam] {
             assert_eq!(build.schemas().rva_current_date, 0, "{build:?}");
         }
@@ -830,10 +839,12 @@ mod schema_lookup_tests {
                 Some(scanned.offset.unwrap().offset() as usize)
             );
         }
-        assert!(GameBuild::Fm26Steam
-            .schemas()
-            .field("no_such_key")
-            .is_none());
+        assert!(
+            GameBuild::Fm26Steam
+                .schemas()
+                .field("no_such_key")
+                .is_none()
+        );
     }
 
     #[test]

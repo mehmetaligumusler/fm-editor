@@ -3,6 +3,7 @@
 //! Search is now cache-driven: `filter()` runs every frame against the
 //! in-memory `EntityCache` — no bridge round-trip needed.
 
+use crate::i18n::UiTr;
 use eframe::egui;
 
 use crate::cache::CachedStaff;
@@ -244,10 +245,10 @@ fn reset_filters(state: &mut StaffSearchState) {
 /// Filtering is live; only functional filters are shown.
 pub fn filter_row(ui: &mut egui::Ui, state: &mut StaffSearchState) {
     ui.horizontal_wrapped(|ui| {
-        ui.label("Name/UID:");
+        ui.label(ui.tr("Name/UID:"));
         ui.add_sized(
             [220.0, 20.0],
-            egui::TextEdit::singleline(&mut state.query).hint_text("Name or exact UID"),
+            egui::TextEdit::singleline(&mut state.query).hint_text(ui.tr("Name or exact UID")),
         ).on_hover_text("Live search: numeric queries match an exact UID. Otherwise all words must occur in the name (case-insensitive, any order). Filters are combined with AND; bounds are inclusive.");
     });
     ui.horizontal_wrapped(|ui| {
@@ -266,22 +267,22 @@ pub fn filter_row(ui: &mut egui::Ui, state: &mut StaffSearchState) {
             ui.add_sized([36.0, 20.0], egui::TextEdit::singleline(&mut state.age_max));
         });
         ui.horizontal(|ui| {
-            ui.label("Role:");
+            ui.label(ui.tr("Role:"));
             let current_label = ROLE_FILTER_OPTIONS
                 .iter()
                 .find(|(idx, _)| *idx == state.role)
                 .map(|(_, label)| *label)
                 .unwrap_or("All Roles");
             egui::ComboBox::from_id_salt("staff_role_filter")
-                .selected_text(current_label)
+                .selected_text(ui.tr(current_label))
                 .width(150.0)
                 .show_ui(ui, |ui| {
                     for (idx, label) in ROLE_FILTER_OPTIONS {
-                        ui.selectable_value(&mut state.role, *idx, *label);
+                        ui.selectable_value(&mut state.role, *idx, &ui.tr(*label));
                     }
                 });
         });
-        if ui.button("Reset all").clicked() {
+        if ui.button(ui.tr("Reset all")).clicked() {
             reset_filters(state);
         }
     });
@@ -339,7 +340,7 @@ pub fn results_grid(
         if ui
             .add_sized(
                 [COL_NAME, ROW_HEIGHT],
-                egui::Button::new(col_label(SortColumn::Name, "Name")).frame(false),
+                egui::Button::new(col_label(SortColumn::Name, &ui.tr("Name"))).frame(false),
             )
             .clicked()
         {
@@ -354,7 +355,7 @@ pub fn results_grid(
         if ui
             .add_sized(
                 [COL_ROLE, ROW_HEIGHT],
-                egui::Button::new(col_label(SortColumn::Role, "Role")).frame(false),
+                egui::Button::new(col_label(SortColumn::Role, &ui.tr("Role"))).frame(false),
             )
             .clicked()
         {
@@ -396,7 +397,7 @@ pub fn results_grid(
         if ui
             .add_sized(
                 [COL_AGE, ROW_HEIGHT],
-                egui::Button::new(col_label(SortColumn::Age, "Age")).frame(false),
+                egui::Button::new(col_label(SortColumn::Age, &ui.tr("Age"))).frame(false),
             )
             .clicked()
         {
@@ -418,7 +419,7 @@ pub fn results_grid(
     }
 
     if results.is_empty() {
-        ui.label("No results.");
+        ui.label(ui.tr("No results."));
         return clicked;
     }
 
@@ -516,7 +517,7 @@ pub fn results_grid(
                         ),
                     );
                 }
-                ui.add_sized([COL_ROLE, ROW_HEIGHT], egui::Label::new(role_text));
+                ui.add_sized([COL_ROLE, ROW_HEIGHT], egui::Label::new(ui.tr(&role_text)));
                 if show_club {
                     ui.add_sized(
                         [80.0, ROW_HEIGHT],

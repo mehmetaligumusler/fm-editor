@@ -26,6 +26,12 @@ pub fn open(pid: u32) -> Result<ProcHandle, String> {
     })
 }
 
+/// Linux has no acquired process handle; the shared FmProcess write gate
+/// enforces read-only builds before process_vm_writev can be reached.
+pub fn open_read_only(pid: u32) -> Result<ProcHandle, String> {
+    open(pid)
+}
+
 /// Read `n` bytes from the target process at `addr`.
 pub fn read_bytes(h: &ProcHandle, addr: u64, n: usize) -> Result<Vec<u8>, String> {
     let mut buf = vec![0u8; n];
@@ -133,14 +139,18 @@ pub fn find_module_info(pid: u32, module_name: &str) -> Result<(u64, u64, String
     for line in maps.lines() {
         // "start-end perms offset dev inode      /full/path" — the path may
         // contain spaces ("Football Manager 26"), so take from the first '/'.
-        let Some(slash) = line.find('/') else { continue };
+        let Some(slash) = line.find('/') else {
+            continue;
+        };
         let p = &line[slash..];
         let file_name = p.rsplit('/').next().unwrap_or("");
         if file_name.to_lowercase() != target {
             continue;
         }
         let range = line.split_whitespace().next().unwrap_or("");
-        let Some((s, e)) = range.split_once('-') else { continue };
+        let Some((s, e)) = range.split_once('-') else {
+            continue;
+        };
         let (Ok(s), Ok(e)) = (u64::from_str_radix(s, 16), u64::from_str_radix(e, 16)) else {
             continue;
         };
@@ -221,4 +231,10 @@ mod tests {
         let pids = find_pids(comm.trim()).unwrap();
         assert!(pids.contains(&std::process::id()), "pids: {pids:?}");
     }
+}
+
+/// Region enumeration for save-name detection: not implemented on Linux
+/// (Proton) yet — save-name stamping stays Windows-only until needed.
+pub fn committed_private_regions(_h: &ProcHandle) -> Vec<(u64, usize)> {
+    Vec::new()
 }

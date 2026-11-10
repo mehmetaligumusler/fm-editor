@@ -16,6 +16,27 @@ use std::collections::HashMap;
 // Per-entity cached structs
 // ---------------------------------------------------------------------------
 
+/// One active injury on a cached player (see `crate::injury`).
+pub struct InjuryInfo {
+    /// Address of the injury record (day counts live at `full_days`).
+    pub record_addr: u64,
+    /// Address of the conditions object holding the injury + absence
+    /// vectors (healing clears both).
+    pub conditions_addr: u64,
+    /// Raw [begin][end] of the injuries vector at capture time (16 bytes).
+    pub injuries_vec_raw: Vec<u8>,
+    /// Raw [begin][end] of the absences vector at capture time (16 bytes).
+    pub absences_vec_raw: Vec<u8>,
+    /// Descriptive injury-type name, e.g. "ayak bileğinde kırık".
+    pub name: String,
+    /// Packed start date: day-of-year (flag bits above 0x1FF) and year.
+    pub start_doy: u16,
+    pub start_year: u16,
+    /// Days unable to play fully / light-training days.
+    pub full_days: u16,
+    pub light_days: u16,
+}
+
 pub struct CachedPlayer {
     /// Contract employer, which can differ from current club during a loan.
     pub owning_club_id: Option<u32>,
@@ -84,6 +105,9 @@ pub struct MyClubs {
 
 pub struct EntityCache {
     pub my_clubs: Option<MyClubs>,
+    /// Active injuries by player index; only populated on builds with a
+    /// mapped injury layout (FM24 Epic).
+    pub injuries: std::collections::HashMap<usize, Vec<InjuryInfo>>,
     pub players: Vec<CachedPlayer>,
     pub staff: Vec<CachedStaff>,
     pub clubs: Vec<CachedClub>,

@@ -197,8 +197,14 @@ fn detect_build_from_modules(
     (result, report)
 }
 
-/// True when a `MicrosoftGame.config` (the Microsoft GDK package manifest
-/// every Game Pass PC title ships) sits next to the exe.
+/// Require two Epic markers when recognising a custom installation directory.
+fn has_epic_marker(exe_path: &str) -> bool {
+    std::path::Path::new(exe_path)
+        .parent()
+        .is_some_and(|dir| dir.join(".egstore").is_dir() && dir.join("epic.txt").is_file())
+}
+
+/// True when Microsoft's GDK manifest sits next to the exe.
 fn has_gdk_config(exe_path: &str) -> bool {
     let dir = match exe_path.rfind(['/', '\\']) {
         Some(i) => &exe_path[..i],
@@ -270,8 +276,12 @@ impl FmProcess {
     /// Attach to the game with this PID. The schema comes from that
     /// process's own install path, never from any other attachment.
     pub fn attach_pid(pid: u32) -> Result<Self, String> {
-        let handle = backend::open(pid)?;
         let build = detect_build(pid)?;
+        let handle = if build.allows_writes() {
+            backend::open(pid)?
+        } else {
+            backend::open_read_only(pid)?
+        };
         let module = build.version().module_name();
         let (gp_base, gp_size, gp_path) = backend::find_module_info(pid, module)?;
         // Probe one read up front so a blocked cross-process access path
@@ -337,6 +347,12 @@ impl FmProcess {
         hash_module_header(&self.module_path)
     }
 
+    /// (base, size) of committed private heap regions — used by save-name
+    /// detection. Delegates to the platform backend.
+    pub fn committed_private_regions(&self) -> Vec<(u64, usize)> {
+        backend::committed_private_regions(&self.handle)
+    }
+
     /// Read the current in-game date through this attachment's verified schema.
     /// Unmapped builds, invalid pointers/dates, and failed reads return None.
     pub fn game_date(&self) -> Option<GameDate> {
@@ -394,7 +410,9 @@ impl FmProcess {
         Ok(buf[0])
     }
 
-    /// Write bytes to the target process at `addr`.
+    /// Write bytes to the target process at `addr`. The build write gate
+    /// (`GameBuild::allows_writes`) is enforced where the handle is opened;
+    /// a read-only OS handle refuses any write that reaches it anyway.
     pub fn write_bytes(&self, addr: u64, data: &[u8]) -> Result<(), String> {
         backend::write_bytes(&self.handle, addr, data)
     }
@@ -528,12 +546,46 @@ mod tests {
         assert_eq!(game.to_string(), "FM27 Game Pass (PID 4242)");
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn epic_write_passes_the_gate_and_the_read_only_os_handle_still_refuses() {
+        let fm = FmProcess {
+            handle: backend::open_read_only(std::process::id()).unwrap(),
+            pid: std::process::id(),
+            gp_base: 0,
+            gp_end: 0,
+            module_path: String::new(),
+            build: GameBuild::Fm24Epic,
+            dll_hash_notice: None,
+        };
+        let mut value = std::hint::black_box([0x12u8, 0x34]);
+        let addr = value.as_mut_ptr() as u64;
+        assert_eq!(fm.read_bytes(addr, 2).unwrap(), value);
+        // The build gate is open after live verification, so the read-only
+        // OS handle itself must be the barrier that refuses the write.
+        let error = fm.write_bytes(addr, &[0, 0]).unwrap_err();
+        assert!(!error.contains("no write was attempted"));
+        assert_eq!(value, [0x12, 0x34]);
+    }
+
     #[test]
     fn version_sniffed_per_install_path() {
         let fm24 = r"S:\SteamLibrary\steamapps\common\Football Manager 2024\fm.exe";
         let fm27 = r"S:\SteamLibrary\steamapps\common\Football Manager 27\data\game_plugin.dll";
         assert_eq!(sniff_version(fm24), Ok(GameVersion::Fm24));
         assert_eq!(sniff_version(fm27), Ok(GameVersion::Fm27));
+        assert_eq!(
+            sniff_version(r"C:\Program Files\Epic Games\FootballManager24\fm.exe"),
+            Ok(GameVersion::Fm24)
+        );
+        assert_eq!(
+            sniff_version(r"D:\Games\FootballManager26\game_plugin.dll"),
+            Ok(GameVersion::Fm26)
+        );
+        assert_eq!(
+            sniff_version(r"D:\Games\FootballManager27\game_plugin.dll"),
+            Ok(GameVersion::Fm27)
+        );
         assert!(sniff_version(r"C:\Games\fm.exe").is_err());
         assert_eq!(
             sniff_version(r"C:\Program Files\Epic Games\FootballManager24\fm.exe"),
@@ -594,11 +646,8 @@ mod tests {
             detect_build_from_modules(1, module_info(path), Err("not mapped".into()), |_| {
                 Ok(metadata("Football Manager 2024", "24.4.2+2081827"))
             });
-        assert!(
-            result
-                .unwrap_err()
-                .contains("no schema for the Epic build of FM24")
-        );
+        // Epic now carries the live-verified Fm24Epic schema.
+        assert_eq!(result.unwrap(), GameBuild::Fm24Epic);
         assert!(report.contains("24.4.2+2081827"), "{report}");
         assert!(
             report.contains("release: FM24; source: PE ProductName"),
@@ -794,12 +843,23 @@ mod tests {
         let xbox = r"D:\XboxGames\Football Manager 27\Content\fm.exe";
         let store = r"C:\Program Files\WindowsApps\SportsInteractive.FM27_1.0.0.0_x64__abc\fm.exe";
         assert_eq!(storefront_of(steam, false), Storefront::Steam);
+        assert_eq!(
+            storefront_of(
+                r"C:\Program Files\Epic Games\FootballManager24\fm.exe",
+                false
+            ),
+            Storefront::Epic
+        );
         assert_eq!(storefront_of(proton, false), Storefront::Steam);
         assert_eq!(storefront_of(xbox, false), Storefront::GamePass);
         assert_eq!(storefront_of(store, false), Storefront::GamePass);
         let epic = r"C:\Program Files\Epic Games\FootballManager24\fm.exe";
         assert_eq!(storefront_of(epic, false), Storefront::Epic);
-        assert!(GameBuild::resolve(GameVersion::Fm24, storefront_of(epic, false)).is_err());
+        // The Epic build carries the live-verified Fm24Epic schema.
+        assert_eq!(
+            GameBuild::resolve(GameVersion::Fm24, storefront_of(epic, false)),
+            Ok(GameBuild::Fm24Epic)
+        );
         // A moved Game Pass install is still recognised by its GDK manifest.
         assert_eq!(
             storefront_of(r"E:\Games\FM27\fm.exe", true),

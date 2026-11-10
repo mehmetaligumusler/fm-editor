@@ -47,6 +47,9 @@ pub static FM24: VersionedSchemas = VersionedSchemas {
     club_sub_records: CLUB_SUB_RECORDS,
     stadium_sub_records: &[],
     player_lists: Some(&player::FM24_PLAYER_LISTS),
+    // Healing (our InjuryLayout) is witnessed on the Epic build only; the
+    // Steam build keeps upstream's read-only injury UI via player_lists.
+    injury_layout: None,
     morale_labels: player::MORALE_LABELS,
     person_profile: None,
 
@@ -82,6 +85,78 @@ pub static FM24: VersionedSchemas = VersionedSchemas {
     // FNV-1a-style hash (see `process::hash_dll_header`) of the first 64 KB
     // of fm.exe for the FM24 build this schema was verified against.
     known_dll_hash: 0xFB39_952A_2028_7907,
+    full_finance_vtable_rva: 0,
+    player_coach_vtable_rva: 0,
+    player_person_offset: 0,
+    player_coach_shift: 0,
+    human_manager_vtable_rva: 0,
+    age_reference_year: 2023,
+};
+
+pub(crate) static INJURY_LAYOUT: crate::injury::InjuryLayout = crate::injury::InjuryLayout {
+    conditions_ptr: 0xF8,
+    injuries_vec: 0x0,
+    absences_vec: 0x70,
+    type_ptr: 0x8,
+    type_name: 0x20,
+    start: 0x20,
+    full_days: 0x28,
+    light_days: 0x2A,
+};
+
+/// Epic Windows read-only candidate layout. Array roots were observed live;
+/// inherited field offsets are research leads, not verified editing support.
+/// See docs/fm24/epic-preview.md. Never remove the build-level write lock
+/// without independent in-game field witnesses and acknowledged edit/Undo tests.
+pub static FM24_EPIC: VersionedSchemas = VersionedSchemas {
+    player_fields: PLAYER_FIELDS,
+    staff_fields: STAFF_FIELDS,
+    club_fields: CLUB_FIELDS,
+    stadium_fields: STADIUM_FIELDS,
+
+    player_sub_records: PLAYER_SUB_RECORDS,
+    staff_sub_records: &[],
+    club_sub_records: CLUB_SUB_RECORDS,
+    stadium_sub_records: &[],
+    player_lists: None,
+    morale_labels: player::MORALE_LABELS,
+    person_profile: None,
+    // Witnessed live 2026-11-08 (Livan Burcu, ankle fracture, type id 15):
+    // conditions chain + record offsets identical to the FM27 layout.
+    injury_layout: Some(&INJURY_LAYOUT),
+
+    player_struct_size: 0x3E8, // pool stride
+    staff_struct_size: 0x268,  // pool stride
+    club_read_size: 0x200,     // furthest mapped club field is +0x150; objects are 0x170 apart
+    stadium_entity_stride: 0xB0,
+
+    human_manager_shift: staff::HUMAN_MANAGER_SHIFT,
+    manager_shifted_fields: staff::MANAGER_SHIFTED_FIELDS,
+
+    rva_humans_data: 0x642EDD0,
+    rva_humans_end: 0x642EDD8,
+    rva_staff_data: 0x642EDE8,
+    rva_staff_end: 0x642EDF0,
+    rva_clubs_data: 0x642EF58,
+    rva_clubs_end: 0x642EF60,
+    rva_stadium_base: 0,
+    // Current in-game date, witnessed 2026-11-08 on the user's live career:
+    // the packed DateDayYear pair for 21 June 2026 (day 172, year 2026) held
+    // stably at module+0x642F458, inside the globals cluster just past the
+    // entity-array roots. Two other stable copies live in string/buffer
+    // regions (0x631D5BC, 0x6356C90) and were not chosen. Steam FM24 keeps
+    // 0 (unwitnessed on that build).
+    rva_current_date: 0x642F458,
+
+    // Counts observed in the mapping save (used by scan_arrays.rs labels).
+    fmrte_players: 75726,
+    fmrte_staff: 38258,
+    fmrte_clubs: 36046,
+    fmrte_humans: 1,
+
+    // FNV-1a-style hash (see `process::hash_dll_header`) of the first 64 KB
+    // of fm.exe for the FM24 build this schema was verified against.
+    known_dll_hash: 0x8FA1_13DB_9DCD_8883,
     full_finance_vtable_rva: 0,
     player_coach_vtable_rva: 0,
     player_person_offset: 0,

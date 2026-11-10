@@ -1,11 +1,12 @@
 //! Player detail panel with identity, attributes, positions, traits and contract data.
 
+use crate::i18n::UiTr;
 use eframe::egui;
 
 use crate::fields::{self, Category, Entity};
 use crate::player::{self, Absence, GameDate, Injury, ListState, PlayerRecord};
 use crate::ratings;
-use crate::settings::{format_wage, WagePeriod};
+use crate::settings::{WagePeriod, format_wage};
 use crate::ui::field_widget::{self, FieldEdit};
 
 #[derive(PartialEq)]
@@ -42,9 +43,13 @@ pub fn show(
     );
     // Sub-tab bar
     ui.horizontal(|ui| {
-        ui.selectable_value(tab, PlayerTab::Overview, "Overview");
-        ui.selectable_value(tab, PlayerTab::PositionsTraits, "Positions & Traits");
-        ui.selectable_value(tab, PlayerTab::Contract, "Contract");
+        ui.selectable_value(tab, PlayerTab::Overview, &ui.tr("Overview"));
+        ui.selectable_value(
+            tab,
+            PlayerTab::PositionsTraits,
+            &ui.tr("Positions & Traits"),
+        );
+        ui.selectable_value(tab, PlayerTab::Contract, &ui.tr("Contract"));
     });
     ui.separator();
 
@@ -108,7 +113,7 @@ fn show_overview(
     let id = potential_attributes_id(player, addr);
     let mut preview = ui.data_mut(|data| data.get_temp::<bool>(id).unwrap_or(false));
     if ui
-        .checkbox(&mut preview, "Show potential attributes")
+        .checkbox(&mut preview, &ui.tr("Show potential attributes"))
         .on_hover_text("Estimated attributes at PA; read-only, not a growth guarantee.")
         .changed()
     {
@@ -183,14 +188,29 @@ fn show_overview(
                                 ("Footedness", Category::Footedness),
                             ],
                         };
+                        // FM shows First Touch and Passing inside the
+                        // Goalkeeping block for goalkeepers (and drops them
+                        // from Technical); mirror that per player.
+                        let is_gk = player.field_u8("pos_gk").is_some_and(|v| v >= 15);
                         for &(heading, category) in categories {
+                            let (extras, skips): (&[&str], &[&str]) =
+                                if !is_gk || category != Category::Goalkeeping {
+                                    (&[], &[])
+                                } else {
+                                    (&["first_touch", "passing"], &[])
+                                };
+                            let skips: &[&str] = if is_gk && category == Category::Technical {
+                                &["first_touch", "passing"]
+                            } else {
+                                skips
+                            };
                             egui::Frame::group(col.style())
                                 .inner_margin(8.0)
                                 .show(col, |ui| {
                                     ui.set_width(ui.available_width());
                                     if let Some(raw) = projected.as_mut() {
                                         ui.add_enabled_ui(false, |ui| {
-                                            field_widget::category_column(
+                                            field_widget::category_column_ex(
                                                 schemas,
                                                 ui,
                                                 heading,
@@ -199,10 +219,12 @@ fn show_overview(
                                                 raw,
                                                 addr,
                                                 &mut Vec::new(),
+                                                extras,
+                                                skips,
                                             );
                                         });
                                     } else {
-                                        field_widget::category_column(
+                                        field_widget::category_column_ex(
                                             schemas,
                                             ui,
                                             heading,
@@ -211,6 +233,8 @@ fn show_overview(
                                             &mut player.raw,
                                             addr,
                                             edits,
+                                            extras,
+                                            skips,
                                         );
                                     }
                                 });
@@ -257,7 +281,7 @@ fn show_personal_details(
 
     // Personal Details
     ui.vertical(|ui| {
-        ui.strong("Identity");
+        ui.strong(ui.tr("Identity"));
         edits.extend(field_widget::dob_edit(ui, &mut player.raw, &p_dob, addr));
         if let Some(f) = schemas.field("p_height") {
             edits.extend(field_widget::raw_u16_edit(
@@ -337,7 +361,7 @@ fn show_personal_details(
 
     // Ability
     ui.vertical(|ui| {
-        ui.strong("Ability");
+        ui.strong(ui.tr("Ability"));
         edits.extend(field_widget::ca_pa_edit(
             ui,
             &mut player.raw,
@@ -349,7 +373,7 @@ fn show_personal_details(
 
     // Stats
     ui.vertical(|ui| {
-        ui.strong("Stats");
+        ui.strong(ui.tr("Stats"));
         // Each row shows only when the record's schema maps the field.
         if let Some(apps) = player.field_u16("p_senior_apps") {
             field_widget::info_label(ui, "Snr Apps", apps);
@@ -371,7 +395,16 @@ fn show_personal_details(
             .field_u32("p_weekly_wage")
             .or_else(|| player.field_u32("p_contract_wage"))
         {
-            field_widget::info_label(ui, "Wage", format_wage(wage, wage_period));
+            field_widget::info_label(
+                ui,
+                "Wage",
+                format_wage(
+                    wage,
+                    wage_period,
+                    crate::i18n::language(ui.ctx()),
+                    crate::i18n::currency(ui.ctx()),
+                ),
+            );
         }
     });
 }
@@ -388,7 +421,7 @@ fn show_reputation(
     let p_world_rep = schemas.field("p_world_rep").unwrap();
     // Reputation
     ui.vertical(|ui| {
-        ui.strong("Reputation");
+        ui.strong(ui.tr("Reputation"));
         if let Some(e) =
             field_widget::raw_u16_edit(ui, &p_current_rep, &mut player.raw, 10000, addr)
         {
@@ -458,7 +491,7 @@ fn show_positions_traits(
                         .max_height(height)
                         .show(ui, |ui| {
                             let heading_height = if height >= 414.0 {
-                                ui.strong("Positions");
+                                ui.strong(ui.tr("Positions"));
                                 24.0
                             } else {
                                 0.0
@@ -493,7 +526,7 @@ fn show_positions_traits(
             .id_salt("player_positions_stacked")
             .max_height(height)
             .show(ui, |ui| {
-                ui.strong("Positions");
+                ui.strong(ui.tr("Positions"));
                 show_positions_formation_with_height(
                     schemas,
                     ui,
@@ -515,7 +548,7 @@ fn show_traits(
     addr: u64,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong("Traits");
+    ui.strong(ui.tr("Traits"));
     show_traits_checkboxes(schemas, ui, player, addr, edits);
 }
 
@@ -633,7 +666,7 @@ fn show_traits_checkboxes(
 ) {
     let location = schemas.field("p_traits").and_then(|field| field.offset);
     let Some((_, old_mask)) = trait_value(&player.raw, location) else {
-        ui.label("Traits unavailable for this record or game version.");
+        ui.label(ui.tr("Traits unavailable for this record or game version."));
         return;
     };
     let mut new_mask = old_mask;
@@ -727,14 +760,14 @@ fn trait_names(mask: u64) -> String {
 
 fn render_trait_column(ui: &mut egui::Ui, groups: &[(&str, &[u8])], mask: &mut u64) {
     for (heading, ppm_ids) in groups {
-        ui.strong(*heading);
+        ui.strong(ui.tr(heading));
         for &id in *ppm_ids {
             let bit = 1u64 << (id - 1);
             let mut checked = (*mask & bit) != 0;
             if ui
                 .add_enabled(
                     crate::ui::navigation::editing_enabled(ui),
-                    egui::Checkbox::new(&mut checked, player::ppm_name(id)),
+                    egui::Checkbox::new(&mut checked, ui.tr(player::ppm_name(id))),
                 )
                 .changed()
             {
@@ -759,7 +792,7 @@ fn show_contract(
     player: &mut PlayerRecord,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong("Current contract");
+    ui.strong(ui.tr("Current contract"));
     if player.build.version() == crate::game_version::GameVersion::Fm27 {
         show_unverified_contract_type(ui);
     }
@@ -768,7 +801,7 @@ fn show_contract(
     // address. Asking price is in the player struct itself.
     if let (Some(cr), Some(caddr)) = (player.contract_raw.as_mut(), player.contract_addr) {
         if let Some(mut f) = schemas.field("p_contract_wage").cloned() {
-            f.label = "Wage (GBP/week)";
+            f.label = "Wage";
             edits.extend(field_widget::raw_u32_edit(ui, &f, cr, caddr));
         }
         if let Some(f) = schemas.field("p_contract_expiry") {
@@ -877,7 +910,7 @@ fn show_player_status(
     if layout.is_none() && morale.is_none() {
         return;
     }
-    ui.strong("Status");
+    ui.strong(ui.tr("Status"));
     if let Some(field) = morale {
         if let Some(location) = field.offset.as_ref() {
             if let Some(&raw) = player.raw.get(location.offset() as usize) {
@@ -927,7 +960,7 @@ fn show_player_status(
             ui.label("Injury data unavailable (read-only).");
         }
         ListState::Items(items) if items.is_empty() => {
-            ui.label("None");
+            ui.label(ui.tr("None"));
         }
         ListState::Items(items) => {
             for injury in items {
@@ -964,7 +997,7 @@ fn show_player_status(
             ui.label("Unavailability data unavailable (read-only).");
         }
         ListState::Items(items) if items.is_empty() => {
-            ui.label("None");
+            ui.label(ui.tr("None"));
         }
         ListState::Items(items) => {
             for absence in items {
@@ -1273,7 +1306,7 @@ fn show_clauses(
             ui.label("Clause data unavailable (read-only).");
         }
         ListState::Items(items) if items.is_empty() => {
-            ui.label("None");
+            ui.label(ui.tr("None"));
         }
         ListState::Items(items) => {
             for clause in items {
@@ -2730,8 +2763,10 @@ mod tests {
             if width >= 892.0 {
                 let identity = heading("Identity");
                 for attribute in [tech, mental, physical] {
-                    assert!((attribute.top() - identity.top()).abs() < 4.0,
-                        "attributes must start beside personal details: {attribute:?}, {identity:?}");
+                    assert!(
+                        (attribute.top() - identity.top()).abs() < 4.0,
+                        "attributes must start beside personal details: {attribute:?}, {identity:?}"
+                    );
                     assert!(attribute.left() > identity.right());
                 }
                 assert_eq!(tech.left(), set.left());
@@ -3001,12 +3036,15 @@ mod tests {
                             },
                         );
                         let text = painted_text(&output);
-                        assert!(text
-                            .iter()
-                            .any(|(s, _, _)| s == "Contract type: Unknown (read-only)"));
-                        assert!(!text
-                            .iter()
-                            .any(|(s, _, _)| s.contains("Apply Contract Type")));
+                        assert!(
+                            text.iter()
+                                .any(|(s, _, _)| s == "Contract type: Unknown (read-only)")
+                        );
+                        assert!(
+                            !text
+                                .iter()
+                                .any(|(s, _, _)| s.contains("Apply Contract Type"))
+                        );
                         assert!(matches!(tab, PlayerTab::Contract));
                         assert!(edits.is_empty());
                         assert_eq!(player.contract_raw, before);

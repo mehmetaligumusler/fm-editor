@@ -1,5 +1,6 @@
 //! Shared, non-scrolling identity and relationship header for detail panels.
 use crate::fields::FieldLocation;
+use crate::i18n::UiTr;
 use eframe::egui;
 
 pub fn show(
@@ -15,19 +16,20 @@ pub fn show(
     // A shallow strip, not a banner: every item participates in normal wrapping.
     ui.horizontal_wrapped(|ui| {
         ui.heading(name);
-        ui.label(egui::RichText::new(kind).strong());
+        ui.label(egui::RichText::new(ui.tr(kind)).strong());
         ui.label(egui::RichText::new(format!("UID: {uid}")).weak());
         if let Some(age) = age {
-            ui.label(format!("Age: {age}"));
+            ui.label(format!("{} {age}", ui.tr("Age:")));
         }
         if kind != "Club" {
             crate::ui::navigation::club_link(ui, club, club_addr);
         }
-        ui.label(format!(
-            "Nation: {}",
-            nation.filter(|s| !s.trim().is_empty()).unwrap_or("Unknown")
-        ))
-        .on_hover_text("Nation pages are not yet supported.");
+        let nation_text = nation
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| ui.tr("Unknown"));
+        ui.label(format!("{} {}", ui.tr("Nation:"), nation_text))
+            .on_hover_text("Nation pages are not yet supported.");
     });
     ui.add_space(4.0);
 }

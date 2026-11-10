@@ -1,4 +1,5 @@
 //! Shared related-entity links, resolved by cached identity rather than guessed names.
+use crate::i18n::UiTr;
 use std::sync::Arc;
 
 use crate::cache::EntityCache;
@@ -37,7 +38,7 @@ fn resolve_club(cache: &EntityCache, name: &str, addr: Option<u64>) -> Option<Cl
 /// Render a club relationship without inventing a destination for unknown names.
 pub fn club_link(ui: &mut egui::Ui, name: Option<&str>, addr: Option<u64>) {
     let Some(name) = name.filter(|s| !s.trim().is_empty()) else {
-        ui.label("Club: Unknown")
+        ui.label(ui.tr("Club: Unknown"))
             .on_hover_text("Club relationship is unavailable for this record.");
         return;
     };
@@ -46,7 +47,7 @@ pub fn club_link(ui: &mut egui::Ui, name: Option<&str>, addr: Option<u64>) {
         .data_mut(|d| d.get_temp::<Option<Arc<EntityCache>>>(egui::Id::new("entity_link_cache")))
         .flatten();
     let target = cache.as_ref().and_then(|c| resolve_club(c, name, addr));
-    ui.label("Club:");
+    ui.label(ui.tr("Club:"));
     if let Some(target) = target {
         if ui.link(name).on_hover_text("Open club").clicked() {
             ui.ctx()
@@ -140,6 +141,7 @@ mod tests {
     fn cache(names: &[&str]) -> EntityCache {
         EntityCache {
             my_clubs: None,
+            injuries: Default::default(),
             players: vec![],
             staff: vec![],
             clubs: names

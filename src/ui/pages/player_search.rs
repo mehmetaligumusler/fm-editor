@@ -3,6 +3,7 @@
 //! Search is now cache-driven: `filter()` runs every frame against the
 //! in-memory `EntityCache` — no bridge round-trip needed.
 
+use crate::i18n::UiTr;
 use eframe::egui;
 
 use crate::cache::CachedPlayer;
@@ -311,9 +312,9 @@ pub fn filter_row(
 ) -> bool {
     let mut advanced_clicked = false;
     ui.horizontal_wrapped(|ui| {
-        ui.label("Name/UID:");
+        ui.label(ui.tr("Name/UID:"));
         ui.add(egui::TextEdit::singleline(&mut state.query)
-            .desired_width(220.0).hint_text("Name or exact UID"))
+            .desired_width(220.0).hint_text(ui.tr("Name or exact UID")))
             .on_hover_text("Live search: all name words must match (case-insensitive), or enter an exact numeric UID. Filters combine with AND; bounds are inclusive.");
     });
     ui.horizontal_wrapped(|ui| {
@@ -333,7 +334,7 @@ pub fn filter_row(
         });
         ui.add_enabled(
             my_clubs.is_some() || state.my_clubs,
-            egui::Checkbox::new(&mut state.my_clubs, "My clubs"),
+            egui::Checkbox::new(&mut state.my_clubs, &ui.tr("My clubs")),
         )
         .on_hover_text(my_clubs.map_or("Managed club unavailable", |c| c.label.as_str()))
         .on_disabled_hover_text(
@@ -341,12 +342,12 @@ pub fn filter_row(
         );
         let count = advanced_filter_count(state);
         let label = if count > 0 {
-            format!("Advanced ({count})")
+            format!("{} ({count})", ui.tr("Advanced"))
         } else {
-            "Advanced".into()
+            ui.tr("Advanced")
         };
         advanced_clicked = ui.button(label).clicked();
-        if ui.button("Reset all").clicked() {
+        if ui.button(ui.tr("Reset all")).clicked() {
             state.clear_filters();
         }
     });
@@ -416,7 +417,7 @@ pub fn results_grid(
         if ui
             .add_sized(
                 [COL_NAME, ROW_HEIGHT],
-                egui::Button::new(col_label(SortColumn::Name, "Name")).frame(false),
+                egui::Button::new(col_label(SortColumn::Name, &ui.tr("Name"))).frame(false),
             )
             .clicked()
         {
@@ -452,7 +453,7 @@ pub fn results_grid(
         if ui
             .add_sized(
                 [COL_AGE, ROW_HEIGHT],
-                egui::Button::new(col_label(SortColumn::Age, "Age")).frame(false),
+                egui::Button::new(col_label(SortColumn::Age, &ui.tr("Age"))).frame(false),
             )
             .clicked()
         {
@@ -475,7 +476,7 @@ pub fn results_grid(
     }
 
     if results.is_empty() {
-        ui.label("No results.");
+        ui.label(ui.tr("No results."));
         return clicked;
     }
 

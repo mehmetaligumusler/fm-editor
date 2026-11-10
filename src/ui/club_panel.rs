@@ -1,5 +1,6 @@
 //! Club detail panel: Overview, Facilities, Finance, Stadium tabs.
 
+use crate::i18n::UiTr;
 use eframe::egui;
 
 use crate::bridge::ClubView;
@@ -39,7 +40,7 @@ pub(crate) fn show(
         club.nation.as_deref(),
     );
     ui.horizontal(|ui| {
-        ui.label("Ground:");
+        ui.label(ui.tr("Ground:"));
         if let Some(name) = club
             .stadium_name
             .as_deref()
@@ -58,10 +59,10 @@ pub(crate) fn show(
     });
 
     ui.horizontal_wrapped(|ui| {
-        ui.selectable_value(tab, ClubTab::Overview, "Overview");
-        ui.selectable_value(tab, ClubTab::Facilities, "Facilities");
-        ui.selectable_value(tab, ClubTab::Finance, "Finance");
-        ui.selectable_value(tab, ClubTab::Stadium, "Stadium (read-only)");
+        ui.selectable_value(tab, ClubTab::Overview, &ui.tr("Overview"));
+        ui.selectable_value(tab, ClubTab::Facilities, &ui.tr("Facilities"));
+        ui.selectable_value(tab, ClubTab::Finance, &ui.tr("Finance"));
+        ui.selectable_value(tab, ClubTab::Stadium, &ui.tr("Stadium (read-only)"));
         if show_policy {
             ui.selectable_value(tab, ClubTab::ContractPolicy, "Contract policy (trial)");
         }
@@ -100,7 +101,7 @@ fn show_overview(
     club: &mut ClubView,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong("Identity");
+    ui.strong(ui.tr("Identity"));
     field_widget::info_label(ui, "Full Name", &club.full_name);
     field_widget::info_label(ui, "Short Name", &club.short_name);
     field_widget::info_label(ui, "UID", club.uid);
@@ -167,7 +168,7 @@ fn show_facilities(
     club: &mut ClubView,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong("Facilities");
+    ui.strong(ui.tr("Facilities"));
     // Facility rows edit whichever sub-record the schema puts them in. Rows
     // with a `<key>_fin` mirror (FM27 academy coaching / youth recruitment,
     // which FM's Facilities screen reads from the finance object) write the
@@ -185,12 +186,12 @@ fn show_facilities(
         };
         let before = edits.len();
         if let Some((buf, base)) = club.sub_record_mut(container) {
-            u8_drag_1_20(ui, label, buf, offset, base, edits);
+            u8_drag_1_20(ui, &ui.tr(label), buf, offset, base, edits);
         }
         if edits.len() > before {
             let new_val = edits[edits.len() - 1].new_raw[0];
             if let Some(mut mirror) =
-                mirror_u8_edit(schemas, club, &format!("{key}_fin"), label, new_val)
+                mirror_u8_edit(schemas, club, &format!("{key}_fin"), &ui.tr(label), new_val)
             {
                 group_facility_edits(club.addr, key, &mut edits[before], &mut mirror);
                 edits.push(mirror);
@@ -200,7 +201,7 @@ fn show_facilities(
 
     if club.info_raw.is_some() {
         ui.add_space(8.0);
-        ui.strong("Supporter Profile");
+        ui.strong(ui.tr("Supporter Profile"));
         for (label, key) in [
             ("Hardcore %", "c_sup_hardcore"),
             ("Core %", "c_sup_core"),
@@ -217,7 +218,7 @@ fn show_facilities(
         }
 
         ui.add_space(8.0);
-        ui.strong("Supporter Attributes");
+        ui.strong(ui.tr("Supporter Attributes"));
         for (label, key) in [
             ("Loyalty", "c_sup_loyalty"),
             ("Passion", "c_sup_passion"),
@@ -243,10 +244,12 @@ fn show_finance(
     club: &mut ClubView,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong("Finance");
+    ui.strong(ui.tr("Finance"));
     // Each row edits the sub-record its schema location names (FM26 keeps the
     // budgets in a finance → budget sub-record, FM27 in the finance object).
     let mut shown = false;
+    let cur = crate::i18n::currency(ui.ctx());
+    let period = crate::i18n::wage_period(ui.ctx());
     // Labels come from the schema. FM27 has no editable wage budget: its
     // budget and current wage total are shown read-only below.
     for key in [
@@ -261,14 +264,11 @@ fn show_finance(
         let Some(field) = schemas.field(key) else {
             continue;
         };
-        let label = if key == "c_wage_budget" {
-            format!("{} (p/w)", field.label)
-        } else {
-            field.label.to_string()
-        };
-        let label = label.as_str();
+        let wage_row = key == "c_wage_budget";
+        let label = ui.tr(field.label);
+        let factor = cur.factor() * if wage_row { period.factor() } else { 1.0 };
         if let Some((buf, base)) = club.sub_record_mut(container) {
-            u32_drag(ui, label, buf, offset, base, edits);
+            u32_drag(ui, &label, buf, offset, base, edits, factor);
             shown = true;
         }
     }
@@ -280,7 +280,7 @@ fn show_finance(
             continue;
         };
         if let Some((buf, base)) = club.sub_record_mut(container) {
-            f32_drag(ui, label, buf, offset, base, edits);
+            f32_drag(ui, &ui.tr(label), buf, offset, base, edits, cur.factor());
             shown = true;
         }
     }
@@ -295,17 +295,20 @@ fn show_finance(
             continue;
         };
         if let Some(v) = fields::read_field_u32(club, &club.raw, field) {
-            let label = if matches!(key, "c_wage_total" | "c_wage_spend") {
-                format!("{} (p/w)", field.label)
-            } else {
-                field.label.to_string()
-            };
-            field_widget::info_label(ui, &label, v);
+            let wage_row = matches!(key, "c_wage_total" | "c_wage_spend");
+            let label = ui.tr(field.label);
+            let factor = cur.factor() * if wage_row { period.factor() } else { 1.0 };
+            let shown_v = (v as f64 * factor).round() as u64;
+            field_widget::info_label(
+                ui,
+                &label,
+                format!("{} {}", crate::i18n::thousands(shown_v), cur.symbol()),
+            );
             shown = true;
         }
     }
     if !shown {
-        ui.label("Finance data not available.");
+        ui.label(ui.tr("Finance data not available."));
     }
 }
 
@@ -314,7 +317,7 @@ fn show_stadium(
     ui: &mut egui::Ui,
     club: &ClubView,
 ) {
-    ui.strong("Attendance");
+    ui.strong(ui.tr("Attendance"));
     if club.stadium_raw.is_some() {
         for key in ["c_avg_attendance", "c_min_attendance", "c_max_attendance"] {
             if let Some(f) = schemas.field(key) {
@@ -324,12 +327,12 @@ fn show_stadium(
             }
         }
     } else {
-        ui.label("Attendance sub-record not available.");
+        ui.label(ui.tr("Attendance sub-record not available."));
     }
 
     if let Some(se) = &club.stadium_entity_raw {
         ui.separator();
-        ui.strong("Stadium");
+        ui.strong(ui.tr("Stadium"));
         if let Some(name) = &club.stadium_name {
             field_widget::info_label(ui, "Name", name);
         }
@@ -450,6 +453,7 @@ fn u32_drag(
     offset: usize,
     base_addr: u64,
     edits: &mut Vec<FieldEdit>,
+    factor: f64,
 ) {
     if offset + 4 > raw.len() {
         return;
@@ -459,20 +463,53 @@ fn u32_drag(
     let mut val = old_val as i64;
     let enabled = navigation::editing_enabled(ui);
     let mut changed = false;
+    let cur = crate::i18n::currency(ui.ctx());
+    // High-bit values have unverified signedness: render them raw and keep
+    // the guarded history text instead of claiming a money conversion.
+    let verified = old_val & 0x8000_0000 == 0;
+    let fmt = |v: u32| {
+        if v & 0x8000_0000 != 0 {
+            u32_value(label, v)
+        } else {
+            format!(
+                "{} {}",
+                crate::i18n::thousands(((v as f64 * factor).round()) as u64),
+                cur.symbol()
+            )
+        }
+    };
     ui.horizontal(|ui| {
         ui.label(label);
         changed = ui
             .add_enabled_ui(enabled, |ui| {
-                ui.add_sized(
-                    [44.0, 22.0],
-                    egui::DragValue::new(&mut val)
-                        .update_while_editing(false)
-                        .range(0i64..=4_294_967_295i64)
-                        .speed(1.0),
-                )
-                .changed()
+                let drag = egui::DragValue::new(&mut val)
+                    .update_while_editing(false)
+                    .range(0i64..=4_294_967_295i64)
+                    .speed(1.0);
+                let drag = if verified {
+                    drag.custom_formatter(crate::i18n::money_drag_formatter(factor))
+                        .custom_parser(crate::i18n::money_drag_parser(factor))
+                } else {
+                    drag
+                };
+                let changed = ui.add_sized([100.0, 22.0], drag).changed();
+                ui.weak(format!(" {}", cur.symbol()));
+                changed
             })
             .inner;
+        if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
+            let user = ((entry.user_delta as f64 * factor).round()) as i64;
+            let live = ((old_val as f64 * factor).round()) as i64;
+            let base = field_widget::numeric_i64(&entry.baseline) as f64;
+            club_badge(
+                ui,
+                &entry,
+                user,
+                live,
+                (base * factor).round() as i64,
+                |d| fmt(d.clamp(0, u32::MAX as i64) as u32),
+            );
+        }
     });
     if enabled && changed {
         let new_val = val.clamp(0, 4_294_967_295) as u32;
@@ -483,12 +520,11 @@ fn u32_drag(
                 addr: base_addr + offset as u64,
                 old_raw: old_bytes.to_vec(),
                 new_raw: new_bytes.to_vec(),
-                description: format!("{label}: {old_val} \u{2192} {new_val}"),
-                presentation: Some(crate::edit_history::EditPresentation::new(
-                    label,
-                    u32_value(label, old_val),
-                    u32_value(label, new_val),
-                )),
+                description: format!("{label}: {} \u{2192} {}", fmt(old_val), fmt(new_val)),
+                presentation: Some(
+                    crate::edit_history::EditPresentation::new(label, fmt(old_val), fmt(new_val))
+                        .with_numeric_delta(new_val as i64 - old_val as i64),
+                ),
             });
         }
     }
@@ -502,6 +538,7 @@ fn f32_drag(
     offset: usize,
     base_addr: u64,
     edits: &mut Vec<FieldEdit>,
+    factor: f64,
 ) {
     if offset + 4 > raw.len() {
         return;
@@ -522,21 +559,42 @@ fn f32_drag(
     let mut val = old_val;
     let enabled = navigation::editing_enabled(ui);
     let mut changed = false;
+    let cur = crate::i18n::currency(ui.ctx());
+    let fmt = |v: f32| {
+        format!(
+            "{} {}",
+            crate::i18n::thousands(((v as f64 * factor).round() as i64).max(0) as u64),
+            cur.symbol()
+        )
+    };
     ui.horizontal(|ui| {
         ui.label(label);
         changed = ui
             .add_enabled_ui(enabled, |ui| {
-                ui.add_sized(
-                    [44.0, 22.0],
-                    egui::DragValue::new(&mut val)
-                        .update_while_editing(false)
-                        .range(0.0f32..=100_000.0f32)
-                        .clamp_existing_to_range(false)
-                        .speed(0.5),
-                )
-                .changed()
+                let changed = ui
+                    .add_sized(
+                        [100.0, 22.0],
+                        egui::DragValue::new(&mut val)
+                            .update_while_editing(false)
+                            .range(0.0f32..=100_000.0f32)
+                            .clamp_existing_to_range(false)
+                            .speed(0.5)
+                            .custom_formatter(crate::i18n::money_drag_formatter(factor))
+                            .custom_parser(crate::i18n::money_drag_parser(factor)),
+                    )
+                    .changed();
+                ui.weak(format!(" {}", cur.symbol()));
+                changed
             })
             .inner;
+        if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
+            let user = ((entry.user_delta as f64 * factor).round()) as i64;
+            let live = ((old_val as f64 * factor).round()) as i64;
+            let base = f32::from_le_bytes(entry.baseline[..4].try_into().unwrap()) as f64 * factor;
+            club_badge(ui, &entry, user, live, base.round() as i64, |d| {
+                fmt(d.clamp(0, 100_000) as f32)
+            });
+        }
     });
     if enabled && changed && (val - old_val).abs() > 0.001 {
         let new_bytes = val.to_le_bytes();
@@ -545,13 +603,69 @@ fn f32_drag(
             addr: base_addr + offset as u64,
             old_raw: old_bytes.to_vec(),
             new_raw: new_bytes.to_vec(),
-            description: format!("{label}: {old_val:.0} \u{2192} {val:.0}"),
-            presentation: Some(crate::edit_history::EditPresentation::new(
-                label,
-                field_widget::money_value(label, old_val),
-                field_widget::money_value(label, val),
-            )),
+            description: format!("{label}: {} \u{2192} {}", fmt(old_val), fmt(val)),
+            presentation: Some(
+                crate::edit_history::EditPresentation::new(label, fmt(old_val), fmt(val))
+                    .with_numeric_delta(((val - old_val) as f64 * factor).round() as i64),
+            ),
         });
+    }
+}
+
+/// Net-delta badge for club rows: shows the USER's cumulative
+/// intervention; natural development is reported separately in the hover.
+fn club_badge(
+    ui: &mut egui::Ui,
+    entry: &crate::overlay::OverlayEntry,
+    user_delta: i64,
+    live_displayed: i64,
+    baseline_displayed: i64,
+    display: impl Fn(i64) -> String,
+) {
+    if user_delta == 0 {
+        return;
+    }
+    // Natural development: whatever the game moved on its own (live minus
+    // the user's cumulative intervention from the baseline).
+    let natural = live_displayed - baseline_displayed - user_delta;
+    let (text, color) = if user_delta >= 0 {
+        (
+            format!("+{}", display(user_delta)),
+            egui::Color32::from_rgb(70, 200, 110),
+        )
+    } else {
+        (display(user_delta), egui::Color32::from_rgb(240, 110, 100))
+    };
+    let arrow = '→';
+    let mut hover = format!(
+        "{} {} {} {}
+{} {}",
+        ui.tr("Original:"),
+        display(baseline_displayed),
+        arrow,
+        display(live_displayed),
+        ui.tr("Your interventions:"),
+        display(user_delta),
+    );
+    if natural != 0 {
+        hover.push_str(&format!(
+            "
+{} {}",
+            ui.tr("Natural development (by the game):"),
+            display(natural)
+        ));
+    }
+    hover.push_str(&format!(
+        "
+{}",
+        ui.tr("Click to undo this intervention.")
+    ));
+    let response = ui.add(
+        egui::Label::new(egui::RichText::new(text).strong().color(color))
+            .sense(egui::Sense::click()),
+    );
+    if response.on_hover_text(hover).clicked() {
+        crate::overlay::request_undo_for(ui, entry);
     }
 }
 
@@ -598,6 +712,12 @@ fn u8_drag_1_20(
                 .changed()
             })
             .inner;
+        if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
+            let base = entry.baseline.first().copied().unwrap_or(0) as i64;
+            club_badge(ui, &entry, entry.user_delta, old as i64, base, |d| {
+                d.to_string()
+            });
+        }
     });
     if enabled && changed {
         let new_val = val.clamp(1, 20) as u8;
@@ -647,12 +767,13 @@ mod tests {
                 },
                 |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        u32_drag(ui, "Balance", &mut raw, 0, 0x20000, &mut edits);
+                        u32_drag(ui, "Balance", &mut raw, 0, 0x20000, &mut edits, 1.0);
                     });
                 },
             )
         };
         let output = frame(vec![]);
+        // High-bit (unverified signedness) values stay raw, unformatted.
         let pos = text_position(&output.shapes, &old.to_string());
         frame(vec![
             egui::Event::PointerMoved(pos),
@@ -688,7 +809,8 @@ mod tests {
             "raw u32 4294967046 (0xFFFFFF06; signedness unverified)"
         );
         assert!(!p.before.contains("GBP"));
-        assert_eq!(p.after, "250 GBP");
+        // factor 1.0 here: 250 internal → "250 £" with separators/symbol only.
+        assert_eq!(p.after, "250 £");
         assert_eq!(u32_value("Wage Budget (p/w)", 500), "500 GBP/week");
         assert!(u32_value("Balance", 0x8000_0000).contains("signedness unverified"));
     }
@@ -700,7 +822,10 @@ mod tests {
             old_raw: vec![old],
             new_raw: vec![18],
             description: "unchanged".into(),
-            presentation: Some(crate::edit_history::EditPresentation::new(field, old, 18)),
+            presentation: Some(
+                crate::edit_history::EditPresentation::new(field, old, 18)
+                    .with_numeric_delta(18 - old as i64),
+            ),
         };
         let mut primary = make(0x20000, 12, "Youth Coaching");
         let mut mirror = make(0x30000, 9, "Youth Coaching (finance copy)");
@@ -727,7 +852,7 @@ mod tests {
         let mut edits = Vec::new();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                f32_drag(ui, "Price", &mut raw, 0, 0x1000, &mut edits);
+                f32_drag(ui, "Price", &mut raw, 0, 0x1000, &mut edits, 1.0);
             });
         });
         (edits, raw)

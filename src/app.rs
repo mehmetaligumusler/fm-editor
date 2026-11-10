@@ -12,6 +12,7 @@ use crate::edit_history::{
     ActionDraft, ChangeDraft, ChangeHistory, EditPresentation, EntityKind, EntityRef,
 };
 use crate::game_version::GameBuild;
+use crate::i18n::UiTr;
 use crate::player::PlayerRecord;
 use crate::process::RunningGame;
 use crate::settings::{AppSettings, Scale, Theme, WagePeriod, theme_data_id};
@@ -34,6 +35,7 @@ pub enum Page {
     PlayerSearch,
     StaffSearch,
     ClubSearch,
+    InjuredPlayers,
     HumanManager,
 }
 
@@ -184,6 +186,8 @@ pub struct FmEditorApp {
     // Audit reports and current-session chronological Undo authority.
     change_history: ChangeHistory,
     history_ui: crate::ui::edit_history::HistoryUi,
+    current_save_name: Option<String>,
+    injured_state: pages::injured_players::InjuredPlayersState,
     write_error: Option<String>,
     policy_ui: crate::ui::club_policy::PolicyUi,
 
@@ -249,8 +253,10 @@ impl FmEditorApp {
             club_tab: club_panel::ClubTab::Overview,
             manager_view: None,
             manager_loading: false,
-            change_history: ChangeHistory::new(),
+            change_history: ChangeHistory::load(&history_path()),
             history_ui: Default::default(),
+            current_save_name: None,
+            injured_state: Default::default(),
             write_error: None,
             policy_ui: Default::default(),
             status_msg: None,
@@ -359,6 +365,14 @@ impl FmEditorApp {
         while let Some(result) = self.bridge.try_recv() {
             match result {
                 BridgeResult::Connected(pid, counts, game_date) => {
+                    // Same game still running? Revive undo payloads from the
+                    // previous editor run (every write keeps its CAS guard).
+                    self.change_history.note_pid(pid);
+                    self.change_history.revive_session(pid);
+                    // The name arrives later as SaveName; don't keep the
+                    // previous save's name attached to this one.
+                    self.current_save_name = None;
+                    self.change_history.note_save_name(None);
                     self.game_date = game_date;
                     self.clear_entity_state("Save ready: previous editing context closed");
                     self.clear_cache();
@@ -373,6 +387,8 @@ impl FmEditorApp {
                     self.set_status(format!("Connected to {game}"));
                 }
                 BridgeResult::Attached(pid, build, game_date) => {
+                    self.current_save_name = None;
+                    self.change_history.note_save_name(None);
                     self.game_date = game_date;
                     self.conn = ConnState::WaitingForSave(pid);
                     self.clear_entity_state("Reconnected or attached to a process/build");
@@ -381,6 +397,19 @@ impl FmEditorApp {
                     self.game_choices.clear();
                     let game = self.game_label(pid);
                     self.set_status(format!("Attached to {game} \u{2014} waiting for save"));
+                }
+                BridgeResult::SaveName(pid, name) => {
+                    // Late-arriving save name, found by the worker's heap
+                    // scan. Bind it to the attached game — a stale result
+                    // from a previous attach must not rename this save.
+                    if matches!(
+                        self.conn,
+                        ConnState::Ready(p) | ConnState::WaitingForSave(p) if p == pid
+                    ) {
+                        self.current_save_name = name;
+                        self.change_history
+                            .note_save_name(self.current_save_name.clone());
+                    }
                 }
                 BridgeResult::ChooseGame(games) => {
                     // A stale auto-connect answer after a game was attached.
@@ -632,7 +661,15 @@ impl FmEditorApp {
         }
     }
 
+    fn editing_allowed(&self) -> bool {
+        self.conn.is_writable() && self.attached_build.is_some_and(GameBuild::allows_writes)
+    }
+
     fn undo_unavailable_reason(&self) -> Option<String> {
+        if self.attached_build == Some(GameBuild::Fm24Epic) && !GameBuild::Fm24Epic.allows_writes()
+        {
+            return Some("Epic preview is read-only; editing and Undo are disabled.".into());
+        }
         match self.conn {
             ConnState::Ready(_) => self.change_history.undo_reason(),
             ConnState::WaitingForSave(_) => Some("Wait for a loaded save before undoing.".into()),
@@ -928,26 +965,62 @@ impl eframe::App for FmEditorApp {
         let mut nav_reload_clicked = false;
         let mut nav_page_clicked = false;
         let mut reload_save_clicked = false;
+        let mut injury_heals: Vec<pages::injured_players::HealRequest> = Vec::new();
 
         // ===== Menu bar =====
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Load Save").clicked() {
+                ui.menu_button(ui.tr("File"), |ui| {
+                    if ui.button(ui.tr("Load Save")).clicked() {
                         reload_save_clicked = true;
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Quit").clicked() {
+                    if ui.button(ui.tr("Quit")).clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
 
-                ui.menu_button("Settings", |ui| {
-                    ui.menu_button("Theme", |ui| {
+                ui.menu_button(ui.tr("Settings"), |ui| {
+                    ui.menu_button(ui.tr("Currency"), |ui| {
+                        for cur in [
+                            crate::settings::Currency::Gbp,
+                            crate::settings::Currency::Eur,
+                        ] {
+                            if ui
+                                .selectable_label(self.settings.currency == cur, cur.label())
+                                .clicked()
+                            {
+                                self.settings.currency = cur;
+                                crate::i18n::set_currency(ctx, cur);
+                                self.settings.save();
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.menu_button(ui.tr("Language"), |ui| {
+                        for lang in [
+                            crate::i18n::Language::English,
+                            crate::i18n::Language::Turkish,
+                        ] {
+                            if ui
+                                .selectable_label(self.settings.language == lang, lang.label())
+                                .clicked()
+                            {
+                                self.settings.language = lang;
+                                crate::i18n::set_language(ctx, lang);
+                                self.settings.save();
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                    ui.menu_button(ui.tr("Theme"), |ui| {
                         for theme in [Theme::Dark, Theme::Light, Theme::DarkBlue] {
                             if ui
-                                .selectable_label(self.settings.theme == theme, theme.label())
+                                .selectable_label(
+                                    self.settings.theme == theme,
+                                    ui.tr(theme.label()),
+                                )
                                 .clicked()
                             {
                                 self.settings.theme = theme;
@@ -957,7 +1030,7 @@ impl eframe::App for FmEditorApp {
                             }
                         }
                     });
-                    ui.menu_button("Scale", |ui| {
+                    ui.menu_button(ui.tr("Scale"), |ui| {
                         let mut idx = self.settings.scale.to_index() as i32;
                         let labels = ["100%", "125%", "150%"];
                         ui.label(labels[idx as usize]);
@@ -973,13 +1046,13 @@ impl eframe::App for FmEditorApp {
                             self.settings.save();
                         }
                     });
-                    ui.menu_button("Wage Display", |ui| {
+                    ui.menu_button(ui.tr("Wage Display"), |ui| {
                         for period in [WagePeriod::Weekly, WagePeriod::Monthly, WagePeriod::Yearly]
                         {
                             if ui
                                 .selectable_label(
                                     self.settings.wage_period == period,
-                                    period.label(),
+                                    ui.tr(period.label()),
                                 )
                                 .clicked()
                             {
@@ -991,14 +1064,17 @@ impl eframe::App for FmEditorApp {
                     });
                     ui.separator();
                     let mut rts = self.settings.reload_on_tab_switch;
-                    if ui.checkbox(&mut rts, "Reload on tab switch").changed() {
+                    if ui
+                        .checkbox(&mut rts, &ui.tr("Reload on tab switch"))
+                        .changed()
+                    {
                         self.settings.reload_on_tab_switch = rts;
                         self.settings.save();
                     }
-                    ui.menu_button("Face Pack", |ui| {
+                    ui.menu_button(ui.tr("Face Pack"), |ui| {
                         let current = self.settings.face_pack_path.as_deref().unwrap_or("(none)");
-                        ui.label(current);
-                        if ui.button("Set path\u{2026}").clicked() {
+                        ui.label(ui.tr(current));
+                        if ui.button(ui.tr("Set path\u{2026}")).clicked() {
                             if let Some(path) = rfd::FileDialog::new().pick_folder() {
                                 self.settings.face_pack_path =
                                     Some(path.to_string_lossy().into_owned());
@@ -1006,7 +1082,9 @@ impl eframe::App for FmEditorApp {
                             }
                             ui.close_menu();
                         }
-                        if self.settings.face_pack_path.is_some() && ui.button("Clear").clicked() {
+                        if self.settings.face_pack_path.is_some()
+                            && ui.button(ui.tr("Clear")).clicked()
+                        {
                             self.settings.face_pack_path = None;
                             self.settings.save();
                             ui.close_menu();
@@ -1020,9 +1098,12 @@ impl eframe::App for FmEditorApp {
         // without conflicting with the &mut self borrow the closures hold.
         let cache_arc = self.entity_cache.clone();
         navigation::publish_cache(ctx, cache_arc.clone());
+        crate::i18n::set_language(ctx, self.settings.language);
+        crate::i18n::set_currency(ctx, self.settings.currency);
+        crate::i18n::set_wage_period(ctx, self.settings.wage_period);
         navigation::set_editing_enabled(
             ctx,
-            self.conn.is_writable() && !self.change_history.is_pending(),
+            self.editing_allowed() && !self.change_history.is_pending(),
         );
         let wage_period = self.settings.wage_period;
         let face_pack_path = self.settings.face_pack_path.clone();
@@ -1125,18 +1206,21 @@ impl eframe::App for FmEditorApp {
 
                 ui.separator();
                 ui.add_space(8.0);
-                ui.label(egui::RichText::new("BROWSE").small().strong().weak());
+                ui.label(egui::RichText::new(ui.tr("BROWSE")).small().strong().weak());
                 for (page, label) in [
                     (Page::BestXi, "Best XI"),
                     (Page::PlayerSearch, "Players"),
                     (Page::StaffSearch, "Staff"),
                     (Page::ClubSearch, "Clubs"),
+                    (Page::InjuredPlayers, "Injured players"),
                 ] {
                     let selected = self.active_page == page;
                     if ui
                         .add_sized(
                             [ui.available_width(), 30.0],
-                            egui::Button::new(label).selected(selected).frame(selected),
+                            egui::Button::new(ui.tr(label))
+                                .selected(selected)
+                                .frame(selected),
                         )
                         .clicked()
                     {
@@ -1145,12 +1229,17 @@ impl eframe::App for FmEditorApp {
                     }
                 }
                 ui.add_space(12.0);
-                ui.label(egui::RichText::new("MANAGEMENT").small().strong().weak());
+                ui.label(
+                    egui::RichText::new(ui.tr("MANAGEMENT"))
+                        .small()
+                        .strong()
+                        .weak(),
+                );
                 let selected = self.active_page == Page::HumanManager;
                 if ui
                     .add_sized(
                         [ui.available_width(), 30.0],
-                        egui::Button::new("Human Manager")
+                        egui::Button::new(ui.tr("Human Manager"))
                             .selected(selected)
                             .frame(selected),
                     )
@@ -1163,7 +1252,7 @@ impl eframe::App for FmEditorApp {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.label(
-                        egui::RichText::new("GAME CONNECTION")
+                        egui::RichText::new(ui.tr("GAME CONNECTION"))
                             .small()
                             .strong()
                             .weak(),
@@ -1175,30 +1264,30 @@ impl eframe::App for FmEditorApp {
                         ConnState::Ready(_) => {
                             ui.colored_label(
                                 egui::Color32::from_rgb(76, 175, 80),
-                                "\u{25CF} Connected",
+                                format!("\u{25CF} {}", ui.tr("Connected")),
                             );
                         }
                         ConnState::WaitingForSave(_) => {
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 193, 7),
-                                "\u{25CF} Waiting for save",
+                                format!("\u{25CF} {}", ui.tr("Waiting for save…")),
                             );
                         }
                         ConnState::ReadOnly(_) => {
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 152, 0),
-                                "\u{25CF} Game not running",
+                                format!("\u{25CF} {}", ui.tr("Game not running")),
                             );
-                            if ui.button("Reconnect").clicked() {
+                            if ui.button(ui.tr("Reconnect")).clicked() {
                                 attach_requested = true;
                             }
                         }
                         ConnState::Disconnected => {
                             ui.colored_label(
                                 egui::Color32::from_rgb(244, 67, 54),
-                                "\u{25CF} Disconnected",
+                                format!("\u{25CF} {}", ui.tr("Disconnected")),
                             );
-                            if ui.button("Load Game").clicked() {
+                            if ui.button(ui.tr("Load Game")).clicked() {
                                 attach_requested = true;
                             }
                         }
@@ -1208,20 +1297,23 @@ impl eframe::App for FmEditorApp {
                     if matches!(self.conn, ConnState::Disconnected | ConnState::ReadOnly(_))
                         && !self.game_choices.is_empty()
                     {
-                        ui.label("Attach:");
+                        ui.label(ui.tr("Attach:"));
                         for game in &self.game_choices {
                             if ui.button(game.to_string()).clicked() {
                                 attach_pid_requested = Some(game.pid);
                             }
                         }
                     }
-                    ui.checkbox(&mut self.auto_connect, "Auto-connect");
+                    ui.checkbox(&mut self.auto_connect, &ui.tr("Auto-connect"));
 
                     // Reload Save button — available when connected + cache ready
                     if matches!(self.conn, ConnState::Ready(_))
                         && self.cache_load_state == CacheLoadState::Ready
                     {
-                        if ui.button("\u{21BB} Reload Save").clicked() {
+                        if ui
+                            .button(format!("\u{21BB} {}", ui.tr("Reload Save")))
+                            .clicked()
+                        {
                             reload_save_clicked = true;
                         }
                     }
@@ -1281,8 +1373,13 @@ impl eframe::App for FmEditorApp {
                 ui.separator();
                 if let Some(ref c) = self.entity_counts {
                     ui.label(format!(
-                        "Players: {}  Staff: {}  Clubs: {}",
-                        c.players, c.staff, c.clubs
+                        "{} {}  {} {}  {} {}",
+                        ui.tr("Players:"),
+                        c.players,
+                        ui.tr("Staff:"),
+                        c.staff,
+                        ui.tr("Clubs:"),
+                        c.clubs
                     ));
                 }
                 ui.separator();
@@ -1322,19 +1419,60 @@ impl eframe::App for FmEditorApp {
         // the active page's entity type, so e.g. a Player tab doesn't leak
         // into the Club Search view.
 
+        // Net-modification overlay: badges derive from the audit trail each
+        // frame; the widget-side current-bytes check hides stale chains.
+        // Current entity identity (kind + UID) from the active tab: the
+        // overlay only carries this entity's interventions, so edits from
+        // other entities or other careers never leak into the badges.
+        let overlay_map = match (
+            self.active_tab.and_then(|idx| self.open_tabs.get(idx)),
+            cache_arc.as_deref(),
+        ) {
+            (Some(tab), Some(cache)) => {
+                let identity = match tab.entity_type {
+                    EntityTabType::Player => cache
+                        .players
+                        .get(tab.index)
+                        .map(|p| (crate::edit_history::EntityKind::Player, p.uid))
+                        .filter(|(_, uid)| *uid != 0),
+                    EntityTabType::Staff => cache
+                        .staff
+                        .get(tab.index)
+                        .map(|s| (crate::edit_history::EntityKind::Staff, s.uid))
+                        .filter(|(_, uid)| *uid != 0),
+                    EntityTabType::Club => cache
+                        .clubs
+                        .get(tab.index)
+                        .map(|c| (crate::edit_history::EntityKind::Club, c.uid))
+                        .filter(|(_, uid)| *uid != 0),
+                };
+                crate::overlay::build_overlay(
+                    self.change_history.reports(),
+                    identity.map(|(k, u)| (k, u)),
+                    self.current_save_name.as_deref(),
+                )
+            }
+            _ => Default::default(),
+        };
+        crate::overlay::publish(ctx, &overlay_map);
+
         // ===== Central Panel =====
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 if self.change_history.is_pending() {
                     ui.spinner();
                     ui.label("Applying changes to game memory…");
-                } else if self.conn.is_writable() {
-                    ui.label("Editing live — changes apply immediately. Ctrl+Z to undo.");
+                } else if self.attached_build == Some(GameBuild::Fm24Epic)
+                    && !GameBuild::Fm24Epic.allows_writes()
+                {
+                    ui.label("Epic preview — read-only. Field readings are experimental; editing is disabled.");
+                } else if self.editing_allowed() {
+                    ui.label(ui.tr("Editing live — changes apply immediately. Ctrl+Z to undo."));
                 } else {
-                    ui.label("Read-only — editing is disabled until a game and save are connected.");
+                    ui.label(ui.tr("Read-only — editing is disabled until a game and save are connected."));
                 }
                 ui.separator();
-                let undo_label = format!("Undo ({})", self.change_history.undo_len());
+                let undo_label = format!("{} ({})", ui.tr("Undo"), self.change_history.undo_len());
                 let undo_reason = self.undo_unavailable_reason();
                 let undo_hint = undo_reason.clone().unwrap_or_else(|| {
                     format!("Undo latest: {}. Current bytes will be checked before writing.", self.change_history.undo_label().unwrap_or_default())
@@ -1343,7 +1481,7 @@ impl eframe::App for FmEditorApp {
                     .on_hover_text(&undo_hint).on_disabled_hover_text(&undo_hint).clicked() {
                     undo_requested = true;
                 }
-                if ui.button("Change history").clicked() {
+                if ui.button(ui.tr("Change history")).clicked() {
                     self.history_ui.open = !self.history_ui.open;
                 }
                 self.player_comparison.toolbar(ui);
@@ -1356,17 +1494,26 @@ impl eframe::App for FmEditorApp {
             }
             ui.separator();
             let Some(schemas) = schemas else {
-                ui.label("Waiting for fm.exe\u{2026}");
+                ui.label(ui.tr("Waiting for fm.exe…"));
                 return;
             };
             match self.active_page {
+                Page::InjuredPlayers => {
+                    injury_heals = pages::injured_players::show(
+                        ui,
+                        cache_arc.as_deref(),
+                        self.attached_build.unwrap_or(GameBuild::Fm24Epic),
+                        schemas.injury_layout,
+                        &mut self.injured_state,
+                    );
+                }
                 Page::BestXi => {
                     clicked_xi_player = pages::best_xi::show(
                         ui, &mut self.best_xi, schemas, cache_arc.as_ref(),
                     );
                 }
                 // ---- Search pages: filter row always visible, results area swaps ----
-                Page::PlayerSearch | Page::StaffSearch | Page::ClubSearch => {
+                Page::PlayerSearch | Page::StaffSearch | Page::ClubSearch | Page::InjuredPlayers => {
                     // Filter row — always rendered, live filtering each frame.
                     match self.active_page {
                         Page::PlayerSearch => {
@@ -1382,6 +1529,7 @@ impl eframe::App for FmEditorApp {
                         }
                         Page::StaffSearch  => pages::staff_search::filter_row(ui, &mut self.staff_search),
                         Page::ClubSearch   => pages::club_search::filter_row(ui, &mut self.club_search),
+                        Page::InjuredPlayers => {}
                         Page::HumanManager | Page::BestXi => unreachable!(),
                     }
 
@@ -1395,10 +1543,12 @@ impl eframe::App for FmEditorApp {
                     // The count reflects the CURRENT search results, not
                     // the total entity count in the save.
                     let count_text = match self.active_page {
-                        Page::PlayerSearch => format!("Results ({})", player_filtered.len()),
-                        Page::StaffSearch  => format!("Results ({})", staff_filtered.len()),
-                        Page::ClubSearch   => format!("Results ({})", club_filtered.len()),
-                        Page::HumanManager | Page::BestXi => "Results".to_string(),
+                        Page::PlayerSearch => format!("{} ({})", ui.tr("Results"), player_filtered.len()),
+                        Page::StaffSearch  => format!("{} ({})", ui.tr("Results"), staff_filtered.len()),
+                        Page::ClubSearch   => format!("{} ({})", ui.tr("Results"), club_filtered.len()),
+                        Page::HumanManager | Page::BestXi | Page::InjuredPlayers => {
+                            "Results".to_string()
+                        }
                     };
                     let mut close_idx: Option<usize> = None;
                     let mut results_badge_clicked = false;
@@ -1544,7 +1694,7 @@ impl eframe::App for FmEditorApp {
                                     edit_entity = self.attached_build.map(|build| history_club_entity(c, build));
                                     let (e,action) = club_panel::show(schemas,ui,c,&mut self.club_tab,&mut self.policy_ui,
                                         self.attached_build.is_some_and(|b|b.version()==crate::game_version::GameVersion::Fm27),
-                                        self.conn.is_writable() && !self.change_history.is_pending() && edits.is_empty());
+                                        self.conn.is_writable() && self.attached_build.is_some_and(GameBuild::allows_writes) && !self.change_history.is_pending() && edits.is_empty());
                                     edits.extend(e);policy_action=action;
                                 } else {
                                     ui.label("Club details unavailable. Reload while the game is connected.");
@@ -1553,6 +1703,7 @@ impl eframe::App for FmEditorApp {
                         }
                     } else {
                         match self.active_page {
+                            Page::InjuredPlayers => {}
                             Page::PlayerSearch => {
                                 clicked_player = pages::player_search::results_grid(
                                     schemas,
@@ -1599,7 +1750,7 @@ impl eframe::App for FmEditorApp {
                             } else if let Some(ref mut mgr) = self.manager_view {
                                 edit_entity = Some(history_staff_entity(mgr, true));
                                 let e = staff_panel::show_manager(schemas, self.game_date, ui, mgr, &mut self.names);
-                                if self.conn.is_writable() {
+                                if self.editing_allowed() {
                                     edits.extend(e);
                                 }
                             } else {
@@ -1616,11 +1767,22 @@ impl eframe::App for FmEditorApp {
         // Reports cannot write: only latest-action Undo and identity-checked navigation.
         let undo_reason = self.undo_unavailable_reason();
         let undo_label = self.change_history.undo_label();
+        let undoable_ids: std::collections::HashSet<crate::edit_history::ActionId> = self
+            .change_history
+            .reports()
+            .iter()
+            .map(|report| report.id)
+            .filter(|id| self.change_history.undoable(*id))
+            .collect();
+        let mut undo_listed: Option<Vec<crate::edit_history::ActionId>> = None;
+        let mut delete_listed: Option<Vec<crate::edit_history::ActionId>> = None;
         let history_action = self.history_ui.show(
             ctx,
             self.change_history.reports(),
-            crate::ui::edit_history::HistoryUiContext {
+            &crate::ui::edit_history::HistoryUiContext {
                 current_session: self.change_history.session_id(),
+                current_save: self.current_save_name.as_deref(),
+                undoable_ids,
                 current_entity: edit_entity.as_ref(),
                 undo_label: undo_label.as_deref(),
                 undo_reason: undo_reason.as_deref(),
@@ -1630,6 +1792,12 @@ impl eframe::App for FmEditorApp {
         );
         match history_action {
             Some(crate::ui::edit_history::HistoryAction::UndoLatest) => undo_requested = true,
+            Some(crate::ui::edit_history::HistoryAction::UndoListed(ids)) => {
+                undo_listed = Some(ids)
+            }
+            Some(crate::ui::edit_history::HistoryAction::DeleteListed(ids)) => {
+                delete_listed = Some(ids)
+            }
             Some(crate::ui::edit_history::HistoryAction::OpenEntity(target)) => {
                 history_open_entity = Some(target)
             }
@@ -1672,7 +1840,7 @@ impl eframe::App for FmEditorApp {
 
         // A write becomes undoable only after the worker confirms success.
         if let Some(action) = policy_action
-            && self.conn.is_writable()
+            && self.editing_allowed()
             && !self.change_history.is_pending()
             && edits.is_empty()
         {
@@ -1745,9 +1913,50 @@ impl eframe::App for FmEditorApp {
                 Err(reason) => self.write_error = Some(reason),
             }
         }
+        if let Some(ids) = undo_listed.take() {
+            if edits.is_empty() && self.undo_unavailable_reason().is_none() {
+                match self.change_history.undo_actions(&ids) {
+                    Ok(commands) => {
+                        for cmd in commands {
+                            self.bridge.send(cmd);
+                        }
+                    }
+                    Err(reason) => self.write_error = Some(reason),
+                }
+            }
+        }
+        if let Some(ids) = delete_listed.take() {
+            if let Err(reason) = self.change_history.delete_actions(&ids) {
+                self.write_error = Some(reason);
+            }
+        }
+        if let Some(action_id) = crate::overlay::take_undo_request(ctx) {
+            if edits.is_empty()
+                && self.undo_unavailable_reason().is_none()
+                && self.change_history.undoable(action_id)
+            {
+                match self.change_history.undo_actions(&[action_id]) {
+                    Ok(commands) => {
+                        for cmd in commands {
+                            self.bridge.send(cmd);
+                        }
+                    }
+                    Err(reason) => self.write_error = Some(reason),
+                }
+            }
+        }
+        // The audit trail persists across editor restarts.
+        self.change_history.save_if_dirty(&history_path());
+        for (entity, draft) in injury_heals {
+            if self.editing_allowed() && !self.change_history.is_pending() {
+                for cmd in self.change_history.submit(entity, vec![draft]) {
+                    self.bridge.send(cmd);
+                }
+            }
+        }
         if !edits.is_empty() {
             let actions = history_actions(edits);
-            if self.conn.is_writable() && !self.change_history.is_pending() && edit_entity.is_some()
+            if self.editing_allowed() && !self.change_history.is_pending() && edit_entity.is_some()
             {
                 for cmd in self
                     .change_history
@@ -2181,6 +2390,24 @@ fn cached_staff_view(cached: &CachedStaff, build: GameBuild) -> StaffView {
     }
 }
 
+fn history_path() -> std::path::PathBuf {
+    // Tests must never read or write the user's real audit trail: every
+    // call hands out a fresh unique path so app-level tests start empty.
+    if cfg!(test) {
+        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        return std::env::temp_dir().join(format!(
+            "fm_editor_test_history_{}_{}.json",
+            std::process::id(),
+            n
+        ));
+    }
+    dirs::config_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("fm-editor")
+        .join("history.json")
+}
+
 fn editor_title(build: Option<GameBuild>, branch: Option<&str>) -> String {
     let base = build.map_or_else(
         || "FM Editor".to_string(),
@@ -2195,6 +2422,23 @@ fn editor_title(build: Option<GameBuild>, branch: Option<&str>) -> String {
 #[cfg(test)]
 mod title_tests {
     use super::*;
+
+    #[test]
+    fn connected_epic_enables_editing_after_live_verification() {
+        let mut app = FmEditorApp::from_settings(AppSettings::default());
+        app.auto_connect = false;
+        app.conn = ConnState::Ready(123);
+        app.attached_build = Some(GameBuild::Fm24Epic);
+        assert!(app.editing_allowed());
+        assert_ne!(
+            app.undo_unavailable_reason(),
+            Some("Epic preview is read-only; editing and Undo are disabled.".into())
+        );
+        app.attached_build = Some(GameBuild::Fm24Steam);
+        assert!(app.editing_allowed());
+        app.conn = ConnState::Disconnected;
+        assert!(!app.editing_allowed());
+    }
 
     #[test]
     fn attached_version_and_worktree_are_both_visible() {
@@ -2612,6 +2856,7 @@ mod edit_history_integration_tests {
                 before: "12".into(),
                 after: "15".into(),
                 group,
+                numeric_delta: None,
             }),
         }
     }
@@ -2691,6 +2936,7 @@ mod edit_history_integration_tests {
             players: vec![],
             staff: vec![],
             my_clubs: None,
+            injuries: Default::default(),
             clubs: vec![CachedClub {
                 addr: 0x20000,
                 index: 7,

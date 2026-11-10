@@ -1,5 +1,6 @@
 //! Staff detail panel with a persistent identity header and scrollable details.
 
+use crate::i18n::UiTr;
 use eframe::egui;
 
 use crate::bridge::StaffView;
@@ -29,9 +30,9 @@ pub fn show(
         *tab = StaffTab::Overview;
     }
     ui.horizontal(|ui| {
-        ui.selectable_value(tab, StaffTab::Overview, "Overview");
+        ui.selectable_value(tab, StaffTab::Overview, &ui.tr("Overview"));
         if has_contract {
-            ui.selectable_value(tab, StaffTab::Contract, "Contract");
+            ui.selectable_value(tab, StaffTab::Contract, &ui.tr("Contract"));
         }
     });
     ui.separator();
@@ -89,7 +90,7 @@ fn identity(
     edits: &mut Vec<FieldEdit>,
     names: &mut crate::ui::name_picker::NamePicker,
 ) {
-    ui.strong("Identity");
+    ui.strong(ui.tr("Identity"));
     if let Some(dob) = schemas.field("s_dob") {
         edits.extend(field_widget::dob_edit(
             ui,
@@ -186,7 +187,7 @@ fn roles(
     if let Some(roles) = &staff.roles {
         field_widget::roles_column(schemas, ui, "Roles (read-only)", roles, skip_zeros);
     } else {
-        ui.strong("Roles (read-only)");
+        ui.strong(ui.tr("Roles (read-only)"));
         ui.label("No role sub-record.");
     }
 }
@@ -326,7 +327,7 @@ fn show_contract(
     staff: &mut StaffView,
     edits: &mut Vec<FieldEdit>,
 ) {
-    ui.strong("Contract");
+    ui.strong(ui.tr("Contract"));
     contract_rows(schemas, ui, staff, edits);
 }
 

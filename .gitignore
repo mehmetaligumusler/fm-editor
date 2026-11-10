@@ -1,14 +1,2 @@
 target/
-dist/
-__pycache__/
-.launch-verified
-.mcp-port
-.aider*
-*.rawsnap
-
-# Local agent / editor configuration (kept out of the public repo)
-.claude/
-.rusty/
-CLAUDE.md
-*.code-workspace
-.vscode/
+fm-editor.exe
