@@ -807,6 +807,16 @@ pub fn ca_pa_edit(
                     .speed(0.5),
                 VALUE_SIZE[0],
             );
+            if let Some(entry) = crate::overlay::lookup(ui, entity_addr + ca_offset as u64) {
+                intervention_badge(
+                    ui,
+                    &entry,
+                    entry.user_delta,
+                    old_ca as i64,
+                    numeric_i64(&entry.baseline),
+                    |d| d.to_string(),
+                );
+            }
             if changed {
                 let new_val = ca.clamp(0, 200) as u8;
                 if new_val != old_ca {
@@ -816,11 +826,10 @@ pub fn ca_pa_edit(
                         old_raw: vec![old_ca],
                         new_raw: vec![new_val],
                         description: format!("CA: {} \u{2192} {}", old_ca, new_val),
-                        presentation: Some(EditPresentation::new(
-                            "Current Ability",
-                            old_ca,
-                            new_val,
-                        )),
+                        presentation: Some(
+                            EditPresentation::new("Current Ability", old_ca, new_val)
+                                .with_numeric_delta(new_val as i64 - old_ca as i64),
+                        ),
                     });
                 }
             }
@@ -843,6 +852,16 @@ pub fn ca_pa_edit(
                     .speed(0.5),
                 VALUE_SIZE[0],
             );
+            if let Some(entry) = crate::overlay::lookup(ui, entity_addr + pa_offset as u64) {
+                intervention_badge(
+                    ui,
+                    &entry,
+                    entry.user_delta,
+                    old_pa as i64,
+                    numeric_i64(&entry.baseline),
+                    |d| d.to_string(),
+                );
+            }
             if changed {
                 let new_val = pa.clamp(0, 200) as u8;
                 if new_val != old_pa {
@@ -852,11 +871,10 @@ pub fn ca_pa_edit(
                         old_raw: vec![old_pa],
                         new_raw: vec![new_val],
                         description: format!("PA: {} \u{2192} {}", old_pa, new_val),
-                        presentation: Some(EditPresentation::new(
-                            "Potential Ability",
-                            old_pa,
-                            new_val,
-                        )),
+                        presentation: Some(
+                            EditPresentation::new("Potential Ability", old_pa, new_val)
+                                .with_numeric_delta(new_val as i64 - old_pa as i64),
+                        ),
                     });
                 }
             }

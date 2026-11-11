@@ -1455,6 +1455,9 @@ impl eframe::App for FmEditorApp {
             _ => Default::default(),
         };
         crate::overlay::publish(ctx, &overlay_map);
+        // Per-entity intervention summaries (badge strip + undo-all in panels).
+        let entity_summaries = crate::overlay::summaries_by_entity(self.change_history.reports());
+        crate::overlay::publish_entity_summaries(ctx, &entity_summaries);
 
         // ===== Central Panel =====
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -1931,8 +1934,7 @@ impl eframe::App for FmEditorApp {
             }
         }
         let field_undos = crate::overlay::take_undo_requests(ctx);
-        if !field_undos.is_empty() && edits.is_empty() && self.undo_unavailable_reason().is_none()
-        {
+        if !field_undos.is_empty() && edits.is_empty() && self.undo_unavailable_reason().is_none() {
             match self.change_history.undo_actions(&field_undos) {
                 Ok(commands) => {
                     for cmd in commands {

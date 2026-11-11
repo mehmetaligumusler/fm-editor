@@ -319,7 +319,36 @@ impl ChangeHistory {
         }
         for action in stored.actions {
             history.restored_max_action = history.restored_max_action.max(action.report.id);
-            for (index, payload) in action.payloads {
+            // Synthesize payloads for effective legacy actions whose stored
+            // payloads are missing (entries saved before persistence covered
+            // payloads, or cleared by the old end_session). The CAS guard on
+            // each undo write is what decides whether the restore applies.
+            let effective = matches!(
+                action.report.status,
+                ActionStatus::Applied | ActionStatus::PartiallyApplied
+            );
+            let mut payloads = action.payloads;
+            if effective && payloads.is_empty() {
+                payloads = action
+                    .report
+                    .changes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, ch)| !ch.old_raw.is_empty())
+                    .map(|(index, ch)| {
+                        (
+                            index,
+                            StoredPayload {
+                                description: ch.field.clone(),
+                                addr: ch.address,
+                                old_raw: ch.old_raw.clone(),
+                                new_raw: ch.new_raw.clone(),
+                            },
+                        )
+                    })
+                    .collect();
+            }
+            for (index, payload) in payloads {
                 history.revivable.insert((action.report.id, index), payload);
             }
             history.reports.push(action.report);
