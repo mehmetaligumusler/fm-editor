@@ -365,16 +365,19 @@ impl FmEditorApp {
         while let Some(result) = self.bridge.try_recv() {
             match result {
                 BridgeResult::Connected(pid, counts, game_date) => {
-                    // Same game still running? Revive undo payloads from the
-                    // previous editor run (every write keeps its CAS guard).
                     self.change_history.note_pid(pid);
-                    self.change_history.revive_session(pid);
                     // The name arrives later as SaveName; don't keep the
                     // previous save's name attached to this one.
                     self.current_save_name = None;
                     self.change_history.note_save_name(None);
                     self.game_date = game_date;
                     self.clear_entity_state("Save ready: previous editing context closed");
+                    // Revive undo payloads from earlier editor runs AFTER
+                    // clear_entity_state: end_session parks live payloads in
+                    // `revivable`, so reviving first would park them right
+                    // back and every pre-restart action's Undo button would
+                    // stay disabled (CAS still guards each revived write).
+                    self.change_history.revive_session(pid);
                     self.clear_cache();
                     self.conn = ConnState::Ready(pid);
                     let cache_total = counts.players + counts.staff + counts.clubs;
@@ -2827,6 +2830,35 @@ mod edit_history_integration_tests {
                 AttemptOutcome::Interrupted
             );
         }
+    }
+
+    #[test]
+    fn connected_result_revives_parked_payloads_after_session_clear() {
+        // Regression: the Connected handler used to call revive_session and
+        // then clear_entity_state, whose end_session parked the just-revived
+        // payloads right back into `revivable` — every action recorded before
+        // the editor restart kept a disabled Undo button.
+        let mut app = test_app(&[15]);
+        let id = submit_edits(&mut app, vec![change(0x20000, "Scalar", None)])[0];
+        app.complete_write(id, true, None, None);
+        assert!(app.change_history.undoable(id));
+        // Game closes: payloads park, Undo is unavailable while detached.
+        app.handle_game_closed();
+        assert!(!app.change_history.undoable(id));
+        // Reconnect: Connected must clear the old session first and revive
+        // the parked payload after, leaving the action undoable.
+        app.bridge.push_result(BridgeResult::Connected(
+            456,
+            crate::bridge::EntityCounts {
+                players: 0,
+                staff: 0,
+                clubs: 0,
+            },
+            None,
+        ));
+        app.process_results();
+        assert!(app.change_history.undoable(id));
+        assert!(app.change_history.undo_len() >= 1);
     }
 
     #[test]

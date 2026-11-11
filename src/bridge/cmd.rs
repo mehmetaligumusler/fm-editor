@@ -213,6 +213,10 @@ pub enum BridgeResult {
 pub struct ProcessBridge {
     cmd_tx: mpsc::Sender<BridgeCmd>,
     result_rx: mpsc::Receiver<BridgeResult>,
+    /// Test-only clone of the result sender, so tests can inject worker
+    /// results without a live game process.
+    #[cfg(test)]
+    result_tx_test: mpsc::Sender<BridgeResult>,
 }
 
 impl ProcessBridge {
@@ -223,8 +227,15 @@ impl ProcessBridge {
     pub(crate) fn with_policy_trial(allow_policy_trial: bool) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (result_tx, result_rx) = mpsc::channel();
+        #[cfg(test)]
+        let result_tx_test = result_tx.clone();
         thread::spawn(move || worker_loop(cmd_rx, result_tx, allow_policy_trial));
-        Self { cmd_tx, result_rx }
+        Self {
+            cmd_tx,
+            result_rx,
+            #[cfg(test)]
+            result_tx_test,
+        }
     }
 
     pub fn send(&self, cmd: BridgeCmd) {
@@ -233,5 +244,12 @@ impl ProcessBridge {
 
     pub fn try_recv(&self) -> Option<BridgeResult> {
         self.result_rx.try_recv().ok()
+    }
+
+    /// Inject a worker result directly, bypassing the worker thread. Only for
+    /// tests that drive `process_results` without a live game process.
+    #[cfg(test)]
+    pub fn push_result(&self, result: BridgeResult) {
+        self.result_tx_test.send(result).expect("test result channel open");
     }
 }
