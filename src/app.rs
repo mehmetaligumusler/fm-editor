@@ -1930,19 +1930,16 @@ impl eframe::App for FmEditorApp {
                 self.write_error = Some(reason);
             }
         }
-        if let Some(action_id) = crate::overlay::take_undo_request(ctx) {
-            if edits.is_empty()
-                && self.undo_unavailable_reason().is_none()
-                && self.change_history.undoable(action_id)
-            {
-                match self.change_history.undo_actions(&[action_id]) {
-                    Ok(commands) => {
-                        for cmd in commands {
-                            self.bridge.send(cmd);
-                        }
+        let field_undos = crate::overlay::take_undo_requests(ctx);
+        if !field_undos.is_empty() && edits.is_empty() && self.undo_unavailable_reason().is_none()
+        {
+            match self.change_history.undo_actions(&field_undos) {
+                Ok(commands) => {
+                    for cmd in commands {
+                        self.bridge.send(cmd);
                     }
-                    Err(reason) => self.write_error = Some(reason),
                 }
+                Err(reason) => self.write_error = Some(reason),
             }
         }
         // The audit trail persists across editor restarts.

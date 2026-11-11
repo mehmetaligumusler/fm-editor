@@ -795,6 +795,11 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         // ── Injured players page ──────────────────────────────────────────
         ("Injured players", "Sakat Oyuncular"),
         ("Original:", "Orijinal:"),
+        ("Undo all my interventions", "Tüm müdahalelerimi geri al"),
+        ("my interventions", "müdahalem"),
+        ("Intervention summary", "Müdahale Özeti"),
+        ("edits", "düzenleme"),
+        ("net", "net"),
         ("Your interventions:", "Müdahaleleriniz:"),
         (
             "Natural development (by the game):",

@@ -9,7 +9,9 @@ pub use crate::undo::UndoEntry;
 pub type ActionId = u64;
 pub type SessionId = u64;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Hash, Eq, PartialEq, serde::Serialize, serde::Deserialize,
+)]
 pub enum EntityKind {
     Player,
     Staff,

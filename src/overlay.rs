@@ -202,6 +202,112 @@ pub fn request_undo_for(ui: &egui::Ui, entry: &OverlayEntry) {
         .data_mut(|d| d.insert_temp(undo_request_id(), entry.action_id));
 }
 
+/// Queue undos for every action id in `ids` (e.g. all interventions on the
+/// entity the user is viewing). Duplicates are harmless: undo_actions skips
+/// entries whose payloads are already consumed.
+pub fn request_undo_many(ui: &egui::Ui, ids: &[ActionId]) {
+    let mut queued: Vec<ActionId> = ui
+        .ctx()
+        .data_mut(|d| d.get_temp(undo_request_id()))
+        .unwrap_or_default();
+    queued.extend(ids.iter().copied());
+    ui.ctx()
+        .data_mut(|d| d.insert_temp(undo_request_id(), queued));
+}
+
+/// Take the queued field-undo request (call once per frame in the app).
+pub fn take_undo_requests(ctx: &egui::Context) -> Vec<ActionId> {
+    ctx.data_mut(|d| d.remove_temp::<Vec<ActionId>>(undo_request_id()))
+        .unwrap_or_default()
+}
+
+/// Actions that are eligible for undo right now, newest id first — the
+/// order in which `ChangeHistory::undo_actions` processes them.
+pub fn undoable_ids(reports: &[crate::edit_history::ActionReport]) -> Vec<ActionId> {
+    reports
+        .iter()
+        .filter(|r| effective(r.status))
+        .map(|r| r.id)
+        .collect()
+}
+
+/// Aggregate of one entity's effective interventions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntityInterventions {
+    /// Number of actions still in effect.
+    pub action_count: usize,
+    /// Sum of displayed deltas across those actions' changes.
+    pub total_delta: i64,
+    /// The action ids, newest first (for "undo all").
+    pub action_ids: Vec<ActionId>,
+}
+
+/// Aggregate of one entity's effective interventions.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EntitySummary {
+    /// Number of actions still in effect.
+    pub action_count: usize,
+    /// Sum of displayed deltas across those actions' changes.
+    pub total_delta: i64,
+    /// The action ids, newest first (for "undo all").
+    pub action_ids: Vec<ActionId>,
+}
+
+/// Per-entity summaries of the user's effective interventions, keyed by
+/// (entity kind, UID) — the same identity the history window filters by.
+pub fn summaries_by_entity(
+    reports: &[ActionReport],
+) -> HashMap<(crate::edit_history::EntityKind, u32), EntitySummary> {
+    let mut map: HashMap<(crate::edit_history::EntityKind, u32), EntitySummary> = HashMap::new();
+    for r in reports {
+        if !effective(r.status) {
+            continue;
+        }
+        let Some(uid) = r.entity.uid.filter(|u| *u != 0) else {
+            continue;
+        };
+        let key = (r.entity.kind, uid);
+        let entry = map.entry(key).or_insert_with(EntitySummary::default);
+        entry.action_count += 1;
+        entry.action_ids.push(r.id);
+        for ch in &r.changes {
+            entry.total_delta += ch.numeric_delta.unwrap_or(0);
+        }
+    }
+    for summary in map.values_mut() {
+        summary
+            .action_ids
+            .sort_unstable_by_key(|id| std::cmp::Reverse(*id));
+    }
+    map
+}
+
+fn entity_summary_id() -> egui::Id {
+    egui::Id::new("fm_entity_summary")
+}
+
+/// Publish per-entity summaries (call once per frame, before panels render).
+pub fn publish_entity_summaries(
+    ctx: &egui::Context,
+    map: &HashMap<(crate::edit_history::EntityKind, u32), EntitySummary>,
+) {
+    ctx.data_mut(|d| d.insert_temp(entity_summary_id(), map.clone()));
+}
+
+/// The summary for one entity kind + UID, if any interventions exist.
+pub fn entity_summary(
+    ctx: &egui::Context,
+    kind: crate::edit_history::EntityKind,
+    uid: u32,
+) -> Option<EntitySummary> {
+    ctx.data_mut(|d| {
+        d.get_temp::<HashMap<(crate::edit_history::EntityKind, u32), EntitySummary>>(
+            entity_summary_id(),
+        )
+    })
+    .and_then(|map| map.get(&(kind, uid)).cloned())
+}
+
 /// Take the queued field-undo request (call once per frame in the app).
 pub fn take_undo_request(ctx: &egui::Context) -> Option<ActionId> {
     ctx.data_mut(|d| d.remove_temp::<ActionId>(undo_request_id()))

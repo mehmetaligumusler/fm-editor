@@ -3,6 +3,7 @@
 use crate::i18n::UiTr;
 use eframe::egui;
 
+use crate::edit_history::EntityKind;
 use crate::fields::{self, Category, Entity};
 use crate::player::{self, Absence, GameDate, Injury, ListState, PlayerRecord};
 use crate::ratings;
@@ -28,6 +29,35 @@ pub fn show(
     names: &mut crate::ui::name_picker::NamePicker,
 ) -> Vec<FieldEdit> {
     let mut edits = Vec::new();
+
+    // Intervention summary for this player: count + total displayed delta,
+    // with a one-click undo of every effective action on this entity. The
+    // summary is published by app.rs each frame (it owns the history).
+    let uid = player.field_u32("p_uid").filter(|u| *u != 0);
+    if let Some(summary) =
+        uid.and_then(|u| crate::overlay::entity_summary(ui.ctx(), EntityKind::Player, u))
+    {
+        if summary.action_count > 0 {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new(ui.tr("Intervention summary")).strong());
+                ui.label(format!(
+                    "{} {} · {}: {}",
+                    summary.action_count,
+                    ui.tr("edits"),
+                    ui.tr("net"),
+                    summary.total_delta,
+                ));
+                if ui
+                    .small_button(ui.tr("Undo all my interventions"))
+                    .on_hover_text(ui.tr("Click to undo this intervention."))
+                    .clicked()
+                {
+                    crate::overlay::request_undo_many(ui, &summary.action_ids);
+                }
+            });
+            ui.add_space(2.0);
+        }
+    }
     crate::ui::entity_header::show(
         ui,
         player.name.as_deref().unwrap_or("Unknown"),
@@ -1661,6 +1691,7 @@ mod tests {
 
     #[test]
     fn fm24_renders_list_sections_and_fm26_renders_no_new_player_sections() {
+        use crate::edit_history::EntityKind;
         use crate::game_version::GameBuild;
         for build in [GameBuild::Fm24Steam, GameBuild::Fm26Steam] {
             let ctx = egui::Context::default();
