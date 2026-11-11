@@ -1438,6 +1438,9 @@ pub fn money_edit_at(
     }
     let mut val = old as i64;
     let mut changed = false;
+    let cur = crate::i18n::currency(ui.ctx());
+    let factor = cur.factor();
+    let symbol = cur.symbol().chars().next().unwrap_or('x');
     ui.push_id(("money", addr), |ui| {
         ui.horizontal(|ui| {
             profile_label(ui, label);
@@ -1447,22 +1450,32 @@ pub fn money_edit_at(
                     .update_while_editing(false)
                     .range(min as i64..=i32::MAX as i64)
                     .speed(10_000.0)
-                    .custom_formatter(|n, _| {
+                    .custom_formatter(move |n, _| {
                         if n < 0.0 {
                             "Not set".into()
                         } else {
-                            format!("£{n:.0}")
+                            format!(
+                                "{} {}",
+                                crate::i18n::thousands((n * factor).round() as u64),
+                                symbol
+                            )
                         }
                     })
                     .custom_parser(move |s| {
-                        let t = s.trim().trim_start_matches('£').replace(',', "");
+                        let t: String = s
+                            .trim()
+                            .trim_start_matches(['£', '€', symbol])
+                            .replace(',', "")
+                            .chars()
+                            .filter(|c| c.is_ascii_digit() || *c == '-')
+                            .collect();
                         if allow_unset && (t.is_empty() || t.eq_ignore_ascii_case("not set")) {
-                            Some(-1.0)
-                        } else {
-                            t.parse().ok()
+                            return Some(-1.0);
                         }
+                        // User types in DISPLAY currency; store internal GBP.
+                        t.parse::<f64>().ok().map(|shown| (shown / factor).round())
                     }),
-                90.0,
+                110.0,
             );
         });
     });
@@ -1473,11 +1486,15 @@ pub fn money_edit_at(
     if new == old {
         return None;
     }
-    let show = |v: i32| {
+    let show = |v: i32| -> String {
         if v < 0 {
-            "Not set".to_string()
+            ui.tr("Not set").into()
         } else {
-            format!("£{v}")
+            format!(
+                "{} {}",
+                crate::i18n::thousands(((v as f64 * cur.factor()).round()) as u64),
+                cur.symbol()
+            )
         }
     };
     Some(FieldEdit {
@@ -1485,11 +1502,7 @@ pub fn money_edit_at(
         old_raw: old.to_le_bytes().to_vec(),
         new_raw: new.to_le_bytes().to_vec(),
         description: format!("{label}: {} \u{2192} {}", show(old), show(new)),
-        presentation: Some(EditPresentation::new(
-            label,
-            optional_money_value(label, old, allow_unset),
-            optional_money_value(label, new, allow_unset),
-        )),
+        presentation: Some(EditPresentation::new(label, show(old), show(new))),
     })
 }
 
@@ -1751,9 +1764,9 @@ mod tests {
     #[test]
     fn money_commit_metadata_keeps_unset_and_gbp_values() {
         for (label, old, allow_unset, text, expected) in [
-            ("Asking Price", -1, true, "250", "250 GBP"),
+            ("Asking Price", -1, true, "250", "250 £"),
             ("Asking Price", 250, true, "Not set", "Not set"),
-            ("Wage", 120, false, "200", "200 GBP/week"),
+            ("Wage", 120, false, "200", "200 £"),
         ] {
             let ctx = egui::Context::default();
             navigation::set_editing_enabled(&ctx, true);
@@ -1761,10 +1774,11 @@ mod tests {
                 |ui: &mut egui::Ui| money_edit_at(ui, label, old, 0x20000, allow_unset);
             let (output, edit) = metadata_frame(&ctx, vec![], &mut render);
             assert!(edit.is_none());
+            // Default currency GBP (factor 1.0): "250 £".
             let displayed = if old == -1 {
                 "Not set".into()
             } else {
-                format!("£{old}")
+                format!("{} £", crate::i18n::thousands(old as u64))
             };
             for events in [
                 click_text(&output, &displayed),
@@ -1775,10 +1789,8 @@ mod tests {
             let (_, edit) = metadata_frame(&ctx, compact_enter(), &mut render);
             let edit = edit.expect("money commit");
             let presentation = edit.presentation.unwrap();
-            assert_eq!(
-                presentation.before,
-                optional_money_value(label, old, allow_unset)
-            );
+            // before mirrors the per-case displayed value ("Not set" or "N £").
+            assert_eq!(presentation.before, displayed);
             assert_eq!(presentation.after, expected);
             assert!(presentation.group.is_none());
         }
@@ -2202,7 +2214,7 @@ mod tests {
             let value_text = if matches!(kind, 1 | 3 | 5) {
                 "raw=250"
             } else if kind == 8 {
-                "£10"
+                "10 £"
             } else {
                 "10"
             };
