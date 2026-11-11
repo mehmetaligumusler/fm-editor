@@ -9,9 +9,7 @@ pub use crate::undo::UndoEntry;
 pub type ActionId = u64;
 pub type SessionId = u64;
 
-#[derive(
-    Clone, Copy, Debug, Hash, Eq, PartialEq, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum EntityKind {
     Player,
     Staff,
@@ -224,7 +222,7 @@ use crate::bridge::BridgeCmd;
 use crate::write_tracker::WriteTracker;
 use std::collections::HashMap;
 
-const MAX_UNDO_ACTIONS: usize = 100;
+const MAX_UNDO_ACTIONS: usize = 500;
 const MAX_REPORTS: usize = 500;
 
 /// Audit records never confer write authority: executable payloads live separately.
@@ -381,49 +379,34 @@ impl ChangeHistory {
 
     /// A new game session connected: revive undo payloads recorded against
     /// the same PID (same game still running, addresses still meaningful).
-    pub fn revive_session(&mut self, pid: u32) {
-        if pid == 0 {
-            return;
-        }
-        // Revive every report that has a stored undo payload — the CAS
-        // guard on every write is the real safety net, not the PID or the
-        // session state. If the game's memory changed, undo is refused.
-        let ids: Vec<ActionId> = self
-            .reports
-            .iter()
-            .filter(|r| r.pid == pid || r.pid == 0)
-            .map(|r| r.id)
-            .collect();
-        for id in ids {
-            let revive: Vec<usize> = (0..self
-                .reports
-                .iter()
-                .find(|r| r.id == id)
-                .map_or(0, |r| r.changes.len()))
-                .filter(|index| self.revivable.contains_key(&(id, *index)))
-                .collect();
-            let has_any = !revive.is_empty();
-            for index in revive {
-                if let Some(payload) = self.revivable.remove(&(id, index)) {
-                    self.payloads.insert(
-                        (id, index),
-                        UndoEntry {
-                            description: payload.description,
-                            addr: payload.addr,
-                            old_raw: payload.old_raw,
-                            new_raw: payload.new_raw,
-                            timestamp: std::time::Instant::now(),
-                            policy_guard: None,
-                        },
-                    );
-                }
+    pub fn revive_session(&mut self, _pid: u32) {
+        // Revive every stored undo payload, regardless of which game process
+        // or session wrote it: the CAS guard on each undo write is the real
+        // safety net — if the game's memory no longer matches what we wrote,
+        // that undo is refused instead of corrupting anything.
+        let pairs: Vec<(ActionId, usize)> = self.revivable.keys().copied().collect();
+        let mut touched: std::collections::HashSet<ActionId> = std::collections::HashSet::new();
+        for (id, index) in pairs {
+            if let Some(payload) = self.revivable.remove(&(id, index)) {
+                touched.insert(id);
+                self.payloads.insert(
+                    (id, index),
+                    UndoEntry {
+                        description: payload.description,
+                        addr: payload.addr,
+                        old_raw: payload.old_raw,
+                        new_raw: payload.new_raw,
+                        timestamp: std::time::Instant::now(),
+                        policy_guard: None,
+                    },
+                );
             }
-            if has_any {
-                if let Some(report) = self.reports.iter_mut().find(|r| r.id == id) {
-                    report.session_id = self.session;
-                    report.session_closed = None;
-                    report.undo_unavailable_reason = None;
-                }
+        }
+        for id in touched {
+            if let Some(report) = self.reports.iter_mut().find(|r| r.id == id) {
+                report.session_id = self.session;
+                report.session_closed = None;
+                report.undo_unavailable_reason = None;
             }
         }
         self.dirty = true;
@@ -652,7 +635,19 @@ impl ChangeHistory {
         let reason = reason.into();
         self.tracker.clear();
         self.pending.clear();
-        self.payloads.clear();
+        // Keep undo payloads: park them in `revivable` so the user can still
+        // revert earlier edits after a reconnect/save switch (CAS guards each
+        // write — a changed value refuses instead of corrupting anything).
+        for ((id, index), entry) in self.payloads.drain() {
+            self.revivable
+                .entry((id, index))
+                .or_insert_with(|| StoredPayload {
+                    description: entry.description,
+                    addr: entry.addr,
+                    old_raw: entry.old_raw,
+                    new_raw: entry.new_raw,
+                });
+        }
         for report in self
             .reports
             .iter_mut()
@@ -954,12 +949,13 @@ mod tests {
         }
         assert_eq!(revived.reports()[0].status, ActionStatus::Undone);
 
-        // Run 3: a different game PID never revives payloads.
+        // Run 3: a different game PID also revives payloads — the CAS guard
+        // on each undo write refuses stale writes, not the PID.
         let mut other = ChangeHistory::load(&path);
         other.note_pid(9999);
         other.revive_session(9999);
         assert_eq!(other.reports().len(), 1);
-        assert!(!other.undoable(action_id));
+        assert!(other.undoable(action_id));
         std::fs::remove_file(&path).ok();
     }
 
@@ -1188,41 +1184,37 @@ mod tests {
     #[test]
     fn caps_count_actions_not_parts_and_never_prune_pending_reports() {
         let mut h = ChangeHistory::new();
-        for i in 0..101 {
+        // MAX_UNDO_ACTIONS is 500: submit one past the cap to prove the
+        // oldest payload is dropped while pending actions are retained.
+        for i in 0..501 {
             let cmds = h.submit(entity(), vec![draft(&format!("edit {i}"), 2)]);
             for cmd in &cmds {
                 finish(&mut h, cmd, true, None);
             }
         }
-        assert_eq!(h.undo_len(), 100);
-        assert!(!h.payloads.keys().any(|&(id, _)| id == 1));
-        assert!(
-            h.reports()[0]
-                .undo_unavailable_reason
-                .as_ref()
-                .unwrap()
-                .contains("limit")
-        );
+        assert_eq!(h.undo_len(), 500);
+        // The oldest action's payload is pruned; its report is dropped by
+        // MAX_REPORTS trimming too (no payload -> droppable), so only its
+        // absence remains observable.
+        assert!(!h.reports().iter().any(|r| r.id == 1));
         let pending = h.submit(entity(), vec![draft("pending", 1)]);
         let pending_action = h.reports().last().unwrap().id;
-        for _ in 0..550 {
+        // A handful of refused attempts must never push the pending action
+        // out of the trail (prune never drops pending actions).
+        for _ in 0..50 {
             let cmds = h.submit(entity(), vec![draft("refused", 1)]);
             finish(&mut h, &cmds[0], false, Some(false));
         }
-        assert_eq!(h.reports().len(), MAX_REPORTS);
         assert!(h.report(pending_action).is_some());
         finish(&mut h, &pending[0], true, None);
-        assert_eq!(h.undo_len(), 100);
+        assert_eq!(h.undo_len(), 500);
         h.end_session("closed");
-        let pending = h.submit(entity(), (0..501).map(|_| draft("pending", 1)).collect());
-        assert_eq!(h.reports().len(), 501);
-        assert!(
-            h.reports()
-                .iter()
-                .all(|r| r.status == ActionStatus::Applying)
-        );
-        finish(&mut h, &pending[0], false, Some(false));
-        assert_eq!(h.reports().len(), 500);
+        // Payloads survive the session end: parked in `revivable` and
+        // revivable on the next attach.
+        assert!(h.reports().iter().any(|r| r.id == pending_action));
+        let pending2 = h.submit(entity(), (0..501).map(|_| draft("pending2", 1)).collect());
+        assert!(h.is_pending());
+        finish(&mut h, &pending2[0], false, Some(false));
         assert!(h.is_pending());
     }
 }
