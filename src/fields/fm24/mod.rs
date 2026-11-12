@@ -158,9 +158,17 @@ pub static FM24_EPIC: VersionedSchemas = VersionedSchemas {
     // of fm.exe for the FM24 build this schema was verified against.
     known_dll_hash: 0x8FA1_13DB_9DCD_8883,
     full_finance_vtable_rva: 0,
-    player_coach_vtable_rva: 0,
-    player_person_offset: 0,
-    player_coach_shift: 0,
+    // Player-staff hybrids (a playing career plus a staff role) use a second
+    // player class with the person block moved 0xF0 bytes up, exactly like
+    // FM27's player-coach layout. Witnessed live 2026-11-12 on the user's
+    // career (Eric Dier, UID 55032265, obj 0x1E1A64740): the humans array
+    // holds 4,294 of them; UID/DOB/names/caps/contract live at +0xF0 while
+    // CA/PA and the team pointer stay put. 14 more of these people also sit
+    // in the staff array under vtable 0x5C7F458 (Dier: "Eric Jeremy Edgar
+    // Dier", 49 England caps). Steam FM24 keeps 0 (unwitnessed build).
+    player_coach_vtable_rva: 0x5C7E798,
+    player_person_offset: 0x280,
+    player_coach_shift: 0xF0,
     human_manager_vtable_rva: 0,
     age_reference_year: 2023,
 };
