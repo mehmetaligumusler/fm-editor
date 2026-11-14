@@ -12,8 +12,10 @@ pub struct HistoryUi {
     pub open: bool,
     search: String,
     status: StatusFilter,
-    /// "All saves" (None) or a specific save name.
-    save_filter: Option<String>,
+    /// Which save's records the list shows. Follows the loaded save until
+    /// the user picks something in the dropdown themselves.
+    save_filter: SaveFilter,
+    save_filter_touched: bool,
     current_entity_only: bool,
     /// On by default: the persisted audit trail is the point of the file,
     // so previous sessions stay visible until the user narrows the view.
@@ -24,13 +26,43 @@ pub struct HistoryUi {
     window_rect: Option<egui::Rect>,
 }
 
+/// Save scoping for the history list. Strict by design: with a specific save
+/// selected, records stamped for another save (or without a stamp, e.g. made
+/// before save tracking existed) stay hidden — switch to All to see them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SaveFilter {
+    All,
+    /// Records with no save stamp.
+    Unknown,
+    Named(String),
+}
+
+impl SaveFilter {
+    fn label(&self, tr: &dyn Fn(&str) -> String) -> String {
+        match self {
+            Self::All => tr("All saves"),
+            Self::Unknown => tr("Unknown save"),
+            Self::Named(name) => name.clone(),
+        }
+    }
+
+    fn matches(&self, report: &ActionReport) -> bool {
+        match self {
+            Self::All => true,
+            Self::Unknown => report.save_name.is_none(),
+            Self::Named(name) => report.save_name.as_deref() == Some(name.as_str()),
+        }
+    }
+}
+
 impl Default for HistoryUi {
     fn default() -> Self {
         Self {
             open: false,
             search: String::new(),
             status: StatusFilter::default(),
-            save_filter: None,
+            save_filter: SaveFilter::All,
+            save_filter_touched: false,
             current_entity_only: false,
             include_closed_sessions: true,
             #[cfg(test)]
@@ -224,27 +256,51 @@ impl HistoryUi {
                 .hint_text(ui.tr("Search names, UID, fields, values or messages"))
                 .desired_width(ui.available_width()),
         );
-        // Save filter: known save names across the persisted trail.
+        // Save filter: follow the loaded save by default — the user's edits
+        // on other saves (e.g. a second career) stay out of the way until
+        // they explicitly widen the view.
+        if !self.save_filter_touched {
+            self.save_filter = match context.current_save {
+                Some(save) => SaveFilter::Named(save.to_string()),
+                None => SaveFilter::All,
+            };
+        }
         let mut save_names: Vec<String> =
             reports.iter().filter_map(|r| r.save_name.clone()).collect();
+        if let Some(current) = context.current_save
+            && !save_names.iter().any(|name| name == current)
+        {
+            save_names.push(current.to_string());
+        }
         save_names.sort();
         save_names.dedup();
+        let has_unknown = reports.iter().any(|r| r.save_name.is_none());
+        // Pre-translate labels: the dropdown body cannot borrow `ui` for
+        // translations while `show_ui` holds it.
+        let mut options: Vec<(SaveFilter, String)> =
+            vec![(SaveFilter::All, ui.tr("All saves"))];
+        if has_unknown {
+            options.push((SaveFilter::Unknown, ui.tr("Unknown save")));
+        }
+        for name in &save_names {
+            options.push((SaveFilter::Named(name.clone()), name.clone()));
+        }
+        let selected_label = self.save_filter.label(&|text| ui.tr(text));
         ui.horizontal_wrapped(|ui| {
             ui.label(ui.tr("Save:"));
+            let mut selected = self.save_filter.clone();
             egui::ComboBox::from_id_salt("history_save_filter")
-                .selected_text(
-                    self.save_filter
-                        .as_deref()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| ui.tr("All saves")),
-                )
+                .selected_text(selected_label)
                 .width(160.0)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.save_filter, None, &ui.tr("All saves"));
-                    for name in &save_names {
-                        ui.selectable_value(&mut self.save_filter, Some(name.clone()), name);
+                    for (filter, label) in &options {
+                        if ui.selectable_label(&selected == filter, label.clone()).clicked() {
+                            selected = filter.clone();
+                            self.save_filter_touched = true;
+                        }
                     }
                 });
+            self.save_filter = selected;
             egui::ComboBox::from_id_salt("history_status")
                 .selected_text(ui.tr(self.status.label()))
                 .show_ui(ui, |ui| {
@@ -285,9 +341,7 @@ impl HistoryUi {
     }
 
     fn matches(&self, report: &ActionReport, context: &HistoryUiContext<'_>) -> bool {
-        self.save_filter
-            .as_deref()
-            .is_none_or(|save| report.save_name.as_deref().is_none_or(|name| name == save))
+        self.save_filter.matches(report)
             && (self.include_closed_sessions
                 || (report.session_id == context.current_session
                     && report.session_closed.is_none()))

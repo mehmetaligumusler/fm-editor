@@ -12,19 +12,31 @@ use std::path::PathBuf;
 use crate::process::FmProcess;
 
 /// Extract `*.fm` save-name candidates from a NUL-separated memory block.
+///
+/// The name appears in two shapes: bare ("Ana save.fm") and as a full path
+/// ("C:/Users/…/Football Manager 2024/games/bjk.fm"). Bare chunks must pass
+/// the filename charset; path chunks are reduced to their last component
+/// before the same check (witnessed live 2026-11-14: only the path form was
+/// present, which is why detection used to miss the save entirely).
 pub fn candidates_in(data: &[u8]) -> Vec<String> {
     let mut out = Vec::new();
     for chunk in data.split(|&b| b == 0) {
-        if chunk.len() < 6 || chunk.len() > 68 || !chunk.ends_with(b".fm") {
+        if chunk.len() < 6 || chunk.len() > 260 || !chunk.ends_with(b".fm") {
             continue;
         }
-        if let Ok(text) = std::str::from_utf8(chunk) {
-            if text
-                .chars()
-                .all(|c| !c.is_control() && (c.is_alphanumeric() || " ._-()".contains(c)))
-            {
-                out.push(text.to_string());
-            }
+        let Ok(text) = std::str::from_utf8(chunk) else {
+            continue;
+        };
+        // Reduce paths ("C:/Users/…/games/bjk.fm") to the file name.
+        let name = text.rsplit(['/', '\\']).next().unwrap_or(text);
+        if name.len() < 6 || name.len() > 68 {
+            continue;
+        }
+        if name
+            .chars()
+            .all(|c| !c.is_control() && (c.is_alphanumeric() || " ._-()".contains(c)))
+        {
+            out.push(name.to_string());
         }
     }
     out
@@ -123,5 +135,27 @@ mod tests {
         let mut data = long;
         data.extend(b".fm\x00");
         assert!(candidates_in(&data).is_empty());
+    }
+
+    #[test]
+    fn candidates_reduce_full_paths_to_the_save_file_name() {
+        // Witnessed live: FM keeps only the full path of the active save.
+        let data = b"C:\\Users\\Mehmet Ali\\Documents\\Sports Interactive\\Football Manager 2024\\games\\bjk.fm\x00junk\x00";
+        let found = candidates_in(data);
+        assert_eq!(found, vec!["bjk.fm".to_string()]);
+
+        let data = b"prefix text /skins/WTCS.Gold.v1.3.1.fm\x00";
+        let found = candidates_in(data);
+        assert_eq!(found, vec!["WTCS.Gold.v1.3.1.fm".to_string()]);
+    }
+
+    #[test]
+    fn candidates_keep_bare_names_and_reject_path_chars_in_names() {
+        let mut data = b"Ana save.fm\x00".to_vec();
+        // A chunk whose *file name* contains path characters is not a save
+        // name FM could have loaded from the games folder.
+        data.extend(b"C:/bad/name with:colon.fm\x00");
+        let found = candidates_in(&data);
+        assert_eq!(found, vec!["Ana save.fm".to_string()]);
     }
 }

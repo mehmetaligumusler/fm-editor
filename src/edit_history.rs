@@ -238,6 +238,11 @@ pub struct ChangeHistory {
     /// Loaded save's name stamped onto new reports (set on every attach /
     /// save-ready), so the audit trail separates careers by save.
     save_name: Option<String>,
+    /// Highest action id that predates the current save: edits above it were
+    /// submitted while the save name was still being detected and may be
+    /// backfilled. Records at or below it belong to an earlier save (or were
+    /// loaded from disk) and must never be re-attributed.
+    save_stamp_floor: Option<ActionId>,
     /// True when the stored history file needs rewriting.
     dirty: bool,
     /// Undo payloads loaded from disk, revivable when the same game PID
@@ -286,6 +291,7 @@ impl ChangeHistory {
             last_action: 0,
             pid: 0,
             save_name: None,
+            save_stamp_floor: None,
             dirty: false,
             revivable: HashMap::new(),
             restored_max_action: 0,
@@ -298,9 +304,34 @@ impl ChangeHistory {
     }
 
     /// Stamp the loaded save's name onto subsequently submitted reports.
+    /// Clearing the name (a save switch) also raises the backfill floor, so
+    /// edits made on the previous save are never attributed to the next one.
     pub fn note_save_name(&mut self, name: Option<String>) {
+        if name.is_none() {
+            self.save_stamp_floor = Some(self.last_action);
+        }
         self.save_name = name;
         self.dirty = true;
+    }
+
+    /// The save name arrives asynchronously (a full-heap scan after connect),
+    /// so edits submitted before it landed carry no stamp. Attribute those —
+    /// and only those — to the now-known save: records at or below the floor
+    /// predate this save (previous save, or loaded from disk).
+    pub fn backfill_save_name(&mut self, name: &str) {
+        let floor = self.save_stamp_floor.unwrap_or(0);
+        let mut touched = false;
+        for report in self
+            .reports
+            .iter_mut()
+            .filter(|r| r.save_name.is_none() && r.id > floor)
+        {
+            report.save_name = Some(name.to_string());
+            touched = true;
+        }
+        if touched {
+            self.dirty = true;
+        }
     }
 
     /// Load the persisted audit trail. Reports are always visible; undo
@@ -354,6 +385,9 @@ impl ChangeHistory {
             history.reports.push(action.report);
         }
         history.last_action = history.restored_max_action;
+        // Everything loaded from disk predates the current editor run's save
+        // detection; never backfill those records with a later save's name.
+        history.save_stamp_floor = Some(history.restored_max_action);
         // Loaded reports belong to earlier sessions; start a fresh one above.
         let max_session = history
             .reports
@@ -880,6 +914,61 @@ mod tests {
     }
     fn status(h: &ChangeHistory) -> ActionStatus {
         h.reports().last().unwrap().status
+    }
+
+    #[test]
+    fn backfill_attributes_only_edits_made_after_the_save_switch() {
+        let mut h = ChangeHistory::new();
+        let last_id = |h: &ChangeHistory| h.reports().last().unwrap().id;
+        // Save A: name unknown at edit time (detection lagged).
+        h.submit(entity(), vec![draft("old", 1)]);
+        let a = last_id(&h);
+        h.note_save_name(None); // switch: floor rises above the last edit
+        // Save B: two edits before the scan lands, one after.
+        h.submit(entity(), vec![draft("b1", 1)]);
+        let b1 = last_id(&h);
+        h.submit(entity(), vec![draft("b2", 1)]);
+        let b2 = last_id(&h);
+        h.note_save_name(Some("bjk".into()));
+        h.submit(entity(), vec![draft("b3", 1)]);
+        let b3 = last_id(&h);
+
+        h.backfill_save_name("bjk");
+        let stamp = |id: u64| {
+            h.report(id)
+                .unwrap()
+                .save_name
+                .clone()
+                .unwrap_or_else(|| "none".into())
+        };
+        assert_eq!(stamp(a), "none", "previous save's edit keeps no stamp");
+        assert_eq!(stamp(b1), "bjk");
+        assert_eq!(stamp(b2), "bjk");
+        assert_eq!(stamp(b3), "bjk");
+    }
+
+    #[test]
+    fn backfill_never_touches_records_loaded_from_disk() {
+        // load() raises the floor to the highest restored id, so a later
+        // backfill cannot attribute persisted unstamped records to a save
+        // they were not made on.
+        let dir = std::env::temp_dir().join(format!("fmh-backfill-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("history.json");
+        let mut seed = ChangeHistory::new();
+        seed.submit(entity(), vec![draft("legacy", 1)]);
+        let id = seed.reports().last().unwrap().id;
+        seed.save_if_dirty(&path);
+
+        let mut h = ChangeHistory::load(&path);
+        h.note_save_name(None);
+        h.submit(entity(), vec![draft("fresh", 1)]);
+        let fresh = h.reports().last().unwrap().id;
+        h.note_save_name(Some("bjk".into()));
+        h.backfill_save_name("bjk");
+        assert_eq!(h.report(id).unwrap().save_name, None);
+        assert_eq!(h.report(fresh).unwrap().save_name.as_deref(), Some("bjk"));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

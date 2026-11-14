@@ -838,6 +838,7 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         // ── Intervention overlay badges ───────────────────────────────────
         ("Save:", "Kayıt:"),
         ("All saves", "Tüm kayıtlar"),
+        ("Unknown save", "Bilinmeyen save"),
         (
             "Game value now (natural development):",
             "Oyundaki güncel değer (doğal gelişim):",

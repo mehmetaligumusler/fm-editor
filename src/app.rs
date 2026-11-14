@@ -412,6 +412,11 @@ impl FmEditorApp {
                         self.current_save_name = name;
                         self.change_history
                             .note_save_name(self.current_save_name.clone());
+                        // Edits submitted while the scan was still running
+                        // carry no stamp — attribute them to this save.
+                        if let Some(name) = &self.current_save_name {
+                            self.change_history.backfill_save_name(name);
+                        }
                     }
                 }
                 BridgeResult::ChooseGame(games) => {
