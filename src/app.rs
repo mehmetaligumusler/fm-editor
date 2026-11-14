@@ -1464,7 +1464,10 @@ impl eframe::App for FmEditorApp {
         };
         crate::overlay::publish(ctx, &overlay_map);
         // Per-entity intervention summaries (badge strip + undo-all in panels).
-        let entity_summaries = crate::overlay::summaries_by_entity(self.change_history.reports());
+        let entity_summaries = crate::overlay::summaries_by_entity(
+            self.change_history.reports(),
+            self.current_save_name.as_deref(),
+        );
         crate::overlay::publish_entity_summaries(ctx, &entity_summaries);
 
         // ===== Central Panel =====

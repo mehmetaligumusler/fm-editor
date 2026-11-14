@@ -92,11 +92,13 @@ pub fn build_overlay(
             (None, _) => false,
         })
         // Save separation: edits made on another save never enter this
-        // save's badges. Legacy entries (None, saved before save tracking)
-        // stay visible so existing history keeps its badges.
+        // save's badges. Unstamped records (made before save tracking
+        // existed) can belong to any career, so with a save loaded they
+        // stay out too — without one (browse mode) everything shows.
         .filter(|r| match (&r.save_name, current_save) {
             (Some(saved), Some(active)) => saved == active,
-            (None, _) => true,
+            (None, None) => true,
+            (None, Some(_)) => false,
             (Some(_), None) => true,
         })
         .collect();
@@ -257,10 +259,20 @@ pub struct EntitySummary {
 /// (entity kind, UID) — the same identity the history window filters by.
 pub fn summaries_by_entity(
     reports: &[ActionReport],
+    current_save: Option<&str>,
 ) -> HashMap<(crate::edit_history::EntityKind, u32), EntitySummary> {
+    // Same save scoping as `build_overlay`: the profile strip counts only
+    // the loaded save's interventions, never another career's edits on a
+    // same-UID player.
+    let save_ok = |r: &ActionReport| match (&r.save_name, current_save) {
+        (Some(saved), Some(active)) => saved == active,
+        (None, None) => true,
+        (None, Some(_)) => false,
+        (Some(_), None) => true,
+    };
     let mut map: HashMap<(crate::edit_history::EntityKind, u32), EntitySummary> = HashMap::new();
     for r in reports {
-        if !effective(r.status) {
+        if !effective(r.status) || !save_ok(r) {
             continue;
         }
         let Some(uid) = r.entity.uid.filter(|u| *u != 0) else {
@@ -474,5 +486,38 @@ mod tests {
             report(2, ActionStatus::Applied, vec![change(0x1000, 14, 8)]),
         ];
         assert!(build_overlay(&reports, VIEWING, None).is_empty());
+    }
+
+    #[test]
+    fn other_saves_and_unstamped_edits_never_badge_the_loaded_save() {
+        // Two careers share real players' UIDs, so save scoping is the only
+        // thing keeping one career's badges off the other's profile.
+        let mut on_bjk = report(1, ActionStatus::Applied, vec![change(0x1000, 8, 14)]);
+        on_bjk.save_name = Some("bjk".into());
+        let mut on_ana = report(2, ActionStatus::Applied, vec![change(0x1000, 8, 12)]);
+        on_ana.save_name = Some("Ana save".into());
+        let legacy = report(3, ActionStatus::Applied, vec![change(0x1000, 8, 10)]);
+        let reports = vec![on_bjk, on_ana, legacy];
+
+        let overlay = build_overlay(&reports, VIEWING, Some("bjk"));
+        let entry = overlay.get(&0x1000).expect("only bjk's edit badges");
+        assert_eq!(entry.user_delta, 6);
+
+        let summaries = summaries_by_entity(&reports, Some("bjk"));
+        let summary = summaries
+            .get(&(EntityKind::Player, 7))
+            .expect("summary counts only bjk's action");
+        assert_eq!(summary.action_count, 1);
+        assert_eq!(summary.total_delta, 6);
+
+        // No save loaded (browse mode): everything shows again.
+        assert_eq!(build_overlay(&reports, VIEWING, None).len(), 1);
+        assert_eq!(
+            summaries_by_entity(&reports, None)
+                .get(&(EntityKind::Player, 7))
+                .unwrap()
+                .action_count,
+            3
+        );
     }
 }
