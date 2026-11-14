@@ -501,14 +501,17 @@ fn u32_drag(
             let user = ((entry.user_delta as f64 * factor).round()) as i64;
             let live = ((old_val as f64 * factor).round()) as i64;
             let base = field_widget::numeric_i64(&entry.baseline) as f64;
-            club_badge(
-                ui,
-                &entry,
-                user,
-                live,
-                (base * factor).round() as i64,
-                |d| fmt(d.clamp(0, u32::MAX as i64) as u32),
-            );
+            // user/live/base are already in display units (raw × factor);
+            // the display closure must only pretty-print, never convert —
+            // fmt() would multiply by the factor a second time (wage rows:
+            // 10M € interventions read as +606M).
+            club_badge(ui, &entry, user, live, (base * factor).round() as i64, |d| {
+                format!(
+                    "{} {}",
+                    crate::i18n::thousands(d.unsigned_abs() as u64),
+                    cur.symbol()
+                )
+            });
         }
     });
     if enabled && changed {
@@ -591,8 +594,13 @@ fn f32_drag(
             let user = ((entry.user_delta as f64 * factor).round()) as i64;
             let live = ((old_val as f64 * factor).round()) as i64;
             let base = f32::from_le_bytes(entry.baseline[..4].try_into().unwrap()) as f64 * factor;
+            // Already in display units — pretty-print only (see u32_drag).
             club_badge(ui, &entry, user, live, base.round() as i64, |d| {
-                fmt(d.clamp(0, 100_000) as f32)
+                format!(
+                    "{} {}",
+                    crate::i18n::thousands(d.unsigned_abs() as u64),
+                    cur.symbol()
+                )
             });
         }
     });
