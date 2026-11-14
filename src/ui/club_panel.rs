@@ -257,6 +257,7 @@ fn show_finance(
         "c_transfer_budget",
         "c_transfer_remaining",
         "c_wage_budget",
+        "c_max_base_wage",
     ] {
         let Some((container, offset)) = sub_location(schemas, key) else {
             continue;
@@ -264,7 +265,9 @@ fn show_finance(
         let Some(field) = schemas.field(key) else {
             continue;
         };
-        let wage_row = key == "c_wage_budget";
+        // Both stored weekly: the wage budget and the suggested max base
+        // wage display as yearly figures.
+        let wage_row = matches!(key, "c_wage_budget" | "c_max_base_wage");
         let label = ui.tr(field.label);
         let factor = cur.factor() * if wage_row { period.factor() } else { 1.0 };
         if let Some((buf, base)) = club.sub_record_mut(container) {

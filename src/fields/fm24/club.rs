@@ -342,6 +342,20 @@ pub(crate) const FIELDS: &[Field] = &[
         category: Finance,
         offset: sub_raw("finance", 0x81C),
     },
+    // Suggested maximum base wage, i32 £/week. The finance screen's
+    // "Suggested max base wage" column derives every squad status from this
+    // one scalar with fixed multipliers (witnessed live 2026-11-14,
+    // Beşiktaş: 71,073 £/wk = 4,310,000 €/yr for Star/Important Player;
+    // First Team and first-choice GK ×0.85 = 3,664,000; Rotation and cup
+    // GKs ×0.70 = 3,017,000; Impact sub ×0.60 = 2,586,000; Wonderkid
+    // ×0.50 = 2,155,000). No per-status copies exist anywhere in the heap.
+    Field {
+        key: "c_max_base_wage",
+        label: "Suggested Max Base Wage",
+        entity: Club,
+        category: Finance,
+        offset: sub_raw("finance", 0x814),
+    },
     Field {
         key: "c_next_transfer_min",
         label: "Next Min Budget",

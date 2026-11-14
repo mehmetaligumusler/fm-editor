@@ -494,6 +494,9 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("Transfer Remaining", "Kalan Transfer Bütçesi"),
         ("Wage Budget", "Maaş Bütçesi"), // witnessed 2026-11-07 (finance screen)
         ("Wage Spend", "Maaş Harcaması"), // witnessed 2026-11-07 ("Şimdiki Harcama")
+        // Finance screen "ÖNERİLEN MAKSİMUM TEMEL MAAŞ (YIL)" column,
+        // witnessed 2026-11-14 (Beşiktaş wage table).
+        ("Suggested Max Base Wage", "Önerilen Max Temel Maaş"),
         ("Next Min Budget", "Önümüzdeki Sezon Min. Bütçesi"),
         ("Owner Status", "Sahip Durumu"),
         ("Year Founded", "Kuruluş Yılı"),
