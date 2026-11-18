@@ -76,24 +76,18 @@ pub fn clusters_in(data: &[u8], base: u64, balance: i32) -> Vec<DebtCluster> {
     out
 }
 
-/// The game keeps every real copy of the debts in sync, so the true
-/// (loan, grant) pair is the one the majority agrees on. Strays with other
-/// values are scan coincidences (UI caches echoing the amounts, stale
-/// snapshots) — drop them, and drop everything when no pair reaches two
-/// copies (a single "copy" is not trustworthy enough to write to).
-pub fn majority_clusters(mut clusters: Vec<DebtCluster>) -> Vec<DebtCluster> {
+/// Order the verified copies by consensus: the game amortises the loans
+/// continuously (weekly installments), so copies legitimately hold different
+/// generations of the value — there is no single "true" pair to filter to.
+/// Every verified copy gets written (each with its own CAS); the most
+/// common (loan, grant) pair sorts first so the panel shows a stable value.
+pub fn order_by_consensus(mut clusters: Vec<DebtCluster>) -> Vec<DebtCluster> {
     use std::collections::HashMap;
     let mut counts: HashMap<(i32, i32), usize> = HashMap::new();
     for c in &clusters {
         *counts.entry((c.loan, c.grant)).or_default() += 1;
     }
-    let Some((_, best)) = counts.iter().max_by_key(|(_, n)| **n) else {
-        return Vec::new();
-    };
-    if *best < 2 {
-        return Vec::new();
-    }
-    clusters.retain(|c| counts[&(c.loan, c.grant)] == *best);
+    clusters.sort_by_key(|c| std::cmp::Reverse(counts[&(c.loan, c.grant)]));
     clusters
 }
 
@@ -121,7 +115,7 @@ pub fn find_debt_clusters(fm: &FmProcess, balance: i32) -> Vec<DebtCluster> {
         };
         out.extend(clusters_in(&data, base, balance));
     }
-    majority_clusters(out)
+    order_by_consensus(out)
 }
 
 // ─── egui plumbing (same pattern as overlay.rs) ──────────────────────────────
@@ -210,26 +204,21 @@ mod tests {
     }
 
     #[test]
-    fn majority_keeps_the_synced_pair_and_drops_coincidences() {
+    fn consensus_orders_the_most_common_pair_first_but_keeps_every_copy() {
         let cluster = |loan: i32, grant: i32| DebtCluster {
             loan_addr: 0x1000,
             grant_addr: 0xC00,
             loan,
             grant,
         };
-        // Three real copies agree; two strays disagree; a lone pair is not
-        // trustworthy at all.
-        let real = cluster(149_509_056, 78_118_144);
-        let mixed = vec![
-            real,
-            real,
-            real,
-            cluster(149_509_056, 0),
-            cluster(1, 2),
-        ];
-        assert_eq!(majority_clusters(mixed), vec![real, real, real]);
-        assert!(majority_clusters(vec![cluster(1, 2)]).is_empty());
-        assert!(majority_clusters(Vec::new()).is_empty());
+        // The game amortises copies at different times, so generations
+        // coexist; writes must reach every copy, the display just prefers
+        // the most common value.
+        let newest = cluster(140_934_409, 78_118_144);
+        let older = cluster(146_079_197, 78_118_144);
+        let ordered = order_by_consensus(vec![older, newest, older, newest, newest]);
+        assert_eq!(ordered.len(), 5);
+        assert!(ordered.iter().take(3).all(|c| *c == newest));
     }
 
     #[test]

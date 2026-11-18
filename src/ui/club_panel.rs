@@ -349,6 +349,9 @@ fn show_finance(
             crate::commitments::request_resolve_debts(ui);
         }
     } else if !debts.clusters.is_empty() {
+        // Copies amortise at different times, so their values can differ by
+        // an installment or two — that is normal; the first (most common)
+        // pair drives the display and edits reach every copy.
         let loans: Vec<(u64, i32)> = debts
             .clusters
             .iter()
@@ -359,14 +362,6 @@ fn show_finance(
             .iter()
             .map(|c| (c.grant_addr, c.grant))
             .collect();
-        let loan_consistent = loans.windows(2).all(|w| w[0].1 == w[1].1);
-        let grant_consistent = grants.windows(2).all(|w| w[0].1 == w[1].1);
-        if !loan_consistent || !grant_consistent {
-            ui.label(
-                egui::RichText::new(ui.tr("Copies disagree — rescan to refresh."))
-                    .color(egui::Color32::from_rgb(240, 160, 80)),
-            );
-        }
         debt_row(ui, "Bank Loan", &loans, edits, cur.factor());
         debt_row(ui, "Grant Loan", &grants, edits, cur.factor());
         ui.horizontal(|ui| {

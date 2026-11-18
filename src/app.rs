@@ -768,6 +768,22 @@ impl FmEditorApp {
             Default::default()
         };
         self.reconcile_write_buffers(&completion.entry, completion.was_undo, completion.success);
+        // Keep the resolved debt rows in step with acknowledged writes:
+        // the panel draws from the scan result, so without this a
+        // successful edit would visually snap back to the stale value.
+        if completion.success && completion.entry.new_raw.len() == 4 && completion.entry.old_raw.len() == 4 {
+            let new_val = i32::from_le_bytes(completion.entry.new_raw[..4].try_into().unwrap());
+            let old_val = i32::from_le_bytes(completion.entry.old_raw[..4].try_into().unwrap());
+            let applied = if completion.was_undo { old_val } else { new_val };
+            for cluster in &mut self.debt_clusters {
+                if cluster.loan_addr == completion.entry.addr {
+                    cluster.loan = applied;
+                }
+                if cluster.grant_addr == completion.entry.addr {
+                    cluster.grant = applied;
+                }
+            }
+        }
         if completion.success {
             if let Some(warning) = &error {
                 self.write_error = Some(warning.clone());
