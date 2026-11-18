@@ -61,6 +61,24 @@ pub fn thousands(v: u64) -> String {
     out
 }
 
+/// Signed companion to `thousands` for fields that legitimately go negative
+/// (the bank balance): -25999372 → "-25,999,372".
+pub fn thousands_signed(v: i64) -> String {
+    if v < 0 {
+        format!("-{}", thousands(v.unsigned_abs()))
+    } else {
+        thousands(v as u64)
+    }
+}
+
+/// DragValue formatter for signed money: internal £ → display currency,
+/// negatives kept (the unsigned variant clamps them to 0).
+pub fn signed_money_drag_formatter(
+    factor: f64,
+) -> impl Fn(f64, std::ops::RangeInclusive<usize>) -> String + 'static {
+    move |v, _| thousands_signed((v * factor).round() as i64)
+}
+
 /// Internal GBP amount → display currency with separators and symbol,
 /// e.g. 3,663,276 → "4,273,079 €".
 pub fn format_money(gbp: u64, cur: crate::settings::Currency) -> String {

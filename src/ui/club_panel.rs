@@ -285,7 +285,11 @@ fn show_finance(
         let label = ui.tr(field.label);
         let factor = cur.factor() * if wage_row { period.factor() } else { 1.0 };
         if let Some((buf, base)) = club.sub_record_mut(container) {
-            u32_drag(ui, &label, buf, offset, base, edits, factor);
+            if key == "c_balance" {
+                s32_drag(ui, &label, buf, offset, base, edits, factor);
+            } else {
+                u32_drag(ui, &label, buf, offset, base, edits, factor);
+            }
             shown = true;
         }
     }
@@ -548,6 +552,91 @@ fn u32_drag(
             });
         }
     }
+}
+
+/// Editable signed i32 money field — the bank balance goes negative
+/// (witnessed live 2026-11-18: finance+0x14 held -22,293,541 £, exactly the
+/// game's -25,999,372 € Genel Durum figure). The unsigned u32 drag renders
+/// that as a 4-billion "unverified" row, so this variant keeps the sign.
+fn s32_drag(
+    ui: &mut egui::Ui,
+    label: &str,
+    raw: &mut [u8],
+    offset: usize,
+    base_addr: u64,
+    edits: &mut Vec<FieldEdit>,
+    factor: f64,
+) {
+    if offset + 4 > raw.len() {
+        return;
+    }
+    let old_bytes: [u8; 4] = raw[offset..offset + 4].try_into().unwrap();
+    let old_val = i32::from_le_bytes(old_bytes);
+    let mut val = old_val as i64;
+    let enabled = navigation::editing_enabled(ui);
+    let cur = crate::i18n::currency(ui.ctx());
+    let money_fmt = |d: i64| {
+        format!(
+            "{} {}",
+            crate::i18n::thousands_signed(d),
+            cur.symbol()
+        )
+    };
+    ui.horizontal(|ui| {
+        ui.label(label);
+        let changed = ui
+            .add_enabled_ui(enabled, |ui| {
+                let drag = egui::DragValue::new(&mut val)
+                    .update_while_editing(false)
+                    .range(-2_147_483_648i64..=2_147_483_647i64)
+                    .speed(1.0)
+                    .custom_formatter(crate::i18n::signed_money_drag_formatter(factor))
+                    .custom_parser(crate::i18n::money_drag_parser(factor));
+                let changed = ui.add_sized([100.0, 22.0], drag).changed();
+                ui.weak(format!(" {}", cur.symbol()));
+                changed
+            })
+            .inner;
+        if let Some(entry) = crate::overlay::lookup(ui, base_addr + offset as u64) {
+            let user = ((entry.user_delta as f64 * factor).round()) as i64;
+            let live = ((old_val as f64 * factor).round()) as i64;
+            let base = field_widget::numeric_i64(&entry.baseline) as i32 as f64;
+            // Params are already in display units — pretty-print only.
+            club_badge(
+                ui,
+                &entry,
+                user,
+                live,
+                (base * factor).round() as i64,
+                &money_fmt,
+            );
+        }
+        if enabled && changed {
+            let new_val = val.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+            if new_val != old_val {
+                let new_bytes = new_val.to_le_bytes();
+                raw[offset..offset + 4].copy_from_slice(&new_bytes);
+                edits.push(FieldEdit {
+                    addr: base_addr + offset as u64,
+                    old_raw: old_bytes.to_vec(),
+                    new_raw: new_bytes.to_vec(),
+                    description: format!(
+                        "{label}: {} \u{2192} {}",
+                        money_fmt((old_val as f64 * factor).round() as i64),
+                        money_fmt((new_val as f64 * factor).round() as i64)
+                    ),
+                    presentation: Some(
+                        crate::edit_history::EditPresentation::new(
+                            label,
+                            money_fmt((old_val as f64 * factor).round() as i64),
+                            money_fmt((new_val as f64 * factor).round() as i64),
+                        )
+                        .with_numeric_delta(new_val as i64 - old_val as i64),
+                    ),
+                });
+            }
+        }
+    });
 }
 
 /// Editable f32 field (ticket prices, etc.).
