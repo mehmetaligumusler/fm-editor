@@ -718,9 +718,20 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("Copies:", "Kopya sayısı:"),
         ("Bank Loan", "Banka Kredisi"),
         ("Grant Loan", "Hibe Kredisi"),
-        ("Scanning heap for debt records…", "Borç kayıtları için bellek taranıyor…"),
-        ("No debt records found for this club.", "Bu kulüp için borç kaydı bulunamadı."),
-        ("Copies disagree — rescan to refresh.", "Kopyalar farklı — yenilemek için yeniden tarayın."),
+        // Monthly income/expense rows (game's "BU AYKİ GELİR / (GİDER)"
+        // breakdown, witnessed 2026-11-18).
+        ("Monthly Income/Expenses", "Aylık Gelir-Gider"),
+        ("Player Wages (month)", "Oyuncu Maaşları (ay)"),
+        ("Staff Wages (month)", "Personel Maaşları (ay)"),
+        ("Loyalty Bonuses (month)", "Sadakat Primleri (ay)"),
+        ("Transfer Installments (month)", "Transfer Taksitleri (ay)"),
+        ("Non-Football Costs (month)", "Futbol Dışı Giderler (ay)"),
+        ("Commercial Income (month)", "Ticaret Geliri (ay)"),
+        ("TV Income (month)", "TV Geliri (ay)"),
+        (
+            "These feed the game's monthly income/expense screen, the FFP projection and the financial-status badge.",
+            "Bunlar oyunun aylık gelir-gider ekranını, FFP tahminini ve mali durum rozetini besler.",
+        ),
         (
             "Attendance sub-record not available.",
             "Seyirci alt kaydı mevcut değil.",

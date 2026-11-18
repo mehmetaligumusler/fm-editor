@@ -332,122 +332,39 @@ fn show_finance(
         ui.label(ui.tr("Finance data not available."));
     }
 
-    // ── Debts (bank loan / grant): heap-scanned records outside the club
-    //    object. One edit writes every verified copy — CAS per copy, all
-    //    copies grouped into a single undoable action.
+    // ── Monthly income / expense breakdown. Stored accumulators in the
+    //    finance object: the game appends transactions onto them (verified
+    //    live 2026-11-18 — every field matched the game's "BU AYKİ
+    //    GELİR/GİDER" rows), so edits stick and feed the FFP projection
+    //    and the Mali Durum badge. The bank-loan/grant heap records were
+    //    removed here: the game recomputes those from contract data and
+    //    overwrites edits (proven by marker tests the same day).
     ui.add_space(8.0);
-    ui.strong(ui.tr("Debts"));
-    let debts = crate::commitments::published_debts(ui);
-    if debts.resolving {
-        ui.horizontal(|ui| {
-            ui.spinner();
-            ui.label(ui.tr("Scanning heap for debt records…"));
-        });
-    } else if debts.resolved && debts.clusters.is_empty() {
-        ui.label(ui.tr("No debt records found for this club."));
-        if ui.button(ui.tr("Rescan")).clicked() {
-            crate::commitments::request_resolve_debts(ui);
+    ui.strong(ui.tr("Monthly Income/Expenses"));
+    let mut monthly_shown = false;
+    for (label, key) in [
+        ("Player Wages (month)", "c_month_wages"),
+        ("Staff Wages (month)", "c_month_staff_wages"),
+        ("Loyalty Bonuses (month)", "c_month_loyalty"),
+        ("Transfer Installments (month)", "c_month_transfer_inst"),
+        ("Non-Football Costs (month)", "c_month_nonfootball"),
+        ("Commercial Income (month)", "c_month_commercial"),
+        ("TV Income (month)", "c_month_tv_income"),
+    ] {
+        let Some((container, offset)) = sub_location(schemas, key) else {
+            continue;
+        };
+        if let Some((buf, base)) = club.sub_record_mut(container) {
+            s32_drag(ui, &ui.tr(label), buf, offset, base, edits, cur.factor());
+            monthly_shown = true;
         }
-    } else if !debts.clusters.is_empty() {
-        // Copies amortise at different times, so their values can differ by
-        // an installment or two — that is normal; the first (most common)
-        // pair drives the display and edits reach every copy.
-        let loans: Vec<(u64, i32)> = debts
-            .clusters
-            .iter()
-            .map(|c| (c.loan_addr, c.loan))
-            .collect();
-        let grants: Vec<(u64, i32)> = debts
-            .clusters
-            .iter()
-            .map(|c| (c.grant_addr, c.grant))
-            .collect();
-        debt_row(ui, "Bank Loan", &loans, edits, cur.factor());
-        debt_row(ui, "Grant Loan", &grants, edits, cur.factor());
-        ui.horizontal(|ui| {
-            ui.weak(format!(
-                "{} {}",
-                ui.tr("Copies:"),
-                debts.clusters.len()
-            ));
-            if ui.button(ui.tr("Rescan")).clicked() {
-                crate::commitments::request_resolve_debts(ui);
-            }
-        });
-    } else if ui.button(ui.tr("Load Debts")).clicked() {
-        crate::commitments::request_resolve_debts(ui);
     }
-}
-
-/// One debt field across every located copy. Editing writes all copies with
-/// per-copy CAS (each carries its own old bytes), grouped into one action so
-/// Undo reverts them together.
-fn debt_row(
-    ui: &mut egui::Ui,
-    label: &'static str,
-    copies: &[(u64, i32)],
-    edits: &mut Vec<FieldEdit>,
-    factor: f64,
-) {
-    let Some(&(_, current)) = copies.first() else {
-        return;
-    };
-    let mut val = current as i64;
-    let enabled = navigation::editing_enabled(ui);
-    let cur = crate::i18n::currency(ui.ctx());
-    let money = |v: i64| {
-        format!(
-            "{} {}",
-            crate::i18n::thousands_signed(((v as f64 * factor).round()) as i64),
-            cur.symbol()
-        )
-    };
-    ui.horizontal(|ui| {
-        ui.label(ui.tr(label));
-        let changed = ui
-            .add_enabled_ui(enabled, |ui| {
-                let drag = egui::DragValue::new(&mut val)
-                    .update_while_editing(false)
-                    .range(0i64..=2_000_000_000i64)
-                    .speed(1.0)
-                    .custom_formatter(crate::i18n::signed_money_drag_formatter(factor))
-                    .custom_parser(crate::i18n::money_drag_parser(factor));
-                let changed = ui.add_sized([110.0, 22.0], drag).changed();
-                ui.weak(format!(" {}", cur.symbol()));
-                changed
-            })
-            .inner;
-        if enabled && changed {
-            let new_val = val.clamp(0, i32::MAX as i64) as i32;
-            if new_val != current {
-                let group = crate::edit_history::EditGroup::new(
-                    format!("debts:{label}"),
-                    label,
-                    money(current as i64),
-                    money(new_val as i64),
-                );
-                for &(addr, old) in copies {
-                    edits.push(FieldEdit {
-                        addr,
-                        old_raw: old.to_le_bytes().to_vec(),
-                        new_raw: new_val.to_le_bytes().to_vec(),
-                        description: format!("{label}: {} \u{2192} {}", money(old as i64), money(new_val as i64)),
-                        presentation: Some(
-                            crate::edit_history::EditPresentation::new(
-                                label,
-                                money(old as i64),
-                                money(new_val as i64),
-                            )
-                            .with_numeric_delta(new_val as i64 - old as i64),
-                        ),
-                    });
-                    if let Some(p) = edits.last_mut().and_then(|e| e.presentation.as_mut()) {
-                        p.group = Some(group.clone());
-                    }
-                }
-            }
-        }
-    });
+    if monthly_shown {
+        ui.weak(
+            ui.tr("These feed the game's monthly income/expense screen, the FFP projection and the financial-status badge.")
+                .to_string(),
+        );
+    }
 }
 
 fn show_stadium(

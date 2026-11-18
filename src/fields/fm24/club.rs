@@ -363,6 +363,61 @@ pub(crate) const FIELDS: &[Field] = &[
         category: Finance,
         offset: sub_raw("finance", 0x7D4),
     },
+    // Monthly income/expense accumulators — the "BU AYKİ GELİR / (GİDER)"
+    // breakdown on the finances Genel tab. Every offset matched the screen
+    // to the euro on the live career (2026-11-18); the game updates these
+    // by appending transactions, so direct edits stick (balance-style
+    // stored fields, not recomputed values) and the FFP projection and
+    // Mali Durum badge react to them.
+    Field {
+        key: "c_month_wages",
+        label: "Player Wages (month)",
+        entity: Club,
+        category: Finance,
+        offset: sub_raw("finance", 0x290),
+    },
+    Field {
+        key: "c_month_staff_wages",
+        label: "Staff Wages (month)",
+        entity: Club,
+        category: Finance,
+        offset: sub_raw("finance", 0x294),
+    },
+    Field {
+        key: "c_month_loyalty",
+        label: "Loyalty Bonuses (month)",
+        entity: Club,
+        category: Finance,
+        offset: sub_raw("finance", 0x2A0),
+    },
+    Field {
+        key: "c_month_transfer_inst",
+        label: "Transfer Installments (month)",
+        entity: Club,
+        category: Finance,
+        offset: sub_raw("finance", 0x2A4),
+    },
+    Field {
+        key: "c_month_nonfootball",
+        label: "Non-Football Costs (month)",
+        entity: Club,
+        category: Finance,
+        offset: sub_raw("finance", 0x2FC),
+    },
+    Field {
+        key: "c_month_commercial",
+        label: "Commercial Income (month)",
+        entity: Club,
+        category: Finance,
+        offset: sub_raw("finance", 0x330),
+    },
+    Field {
+        key: "c_month_tv_income",
+        label: "TV Income (month)",
+        entity: Club,
+        category: Finance,
+        offset: sub_raw("finance", 0x354),
+    },
     Field {
         key: "c_avg_attendance",
         label: "Avg Attendance",
