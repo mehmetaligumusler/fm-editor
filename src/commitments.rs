@@ -34,6 +34,9 @@ const BALANCE_TO_LOAN: usize = 0x49E;
 const LOAN_TO_GRANT: usize = 0x3FB;
 /// Offset of the due-date u16 pair from the loan amount.
 const LOAN_DUE_DATE: usize = 0x10;
+/// Offset of the start-date u16 pair from the loan amount (witnessed:
+/// (152, 2022) — 1 June 2022, matching the screen's BAŞLANGIÇ column).
+const LOAN_START_DATE: usize = 0x14;
 
 /// Scan one memory block for verified debt clusters. Exposed for tests.
 pub fn clusters_in(data: &[u8], base: u64, balance: i32) -> Vec<DebtCluster> {
@@ -48,27 +51,24 @@ pub fn clusters_in(data: &[u8], base: u64, balance: i32) -> Vec<DebtCluster> {
         let Some(grant_off) = loan_off.checked_sub(LOAN_TO_GRANT) else {
             continue;
         };
-        if loan_off + LOAN_DUE_DATE + 4 > data.len() || grant_off + 4 > data.len() {
+        if loan_off + LOAN_START_DATE + 4 > data.len() || grant_off + 4 > data.len() {
             continue;
         }
         let loan = i32::from_le_bytes(data[loan_off..loan_off + 4].try_into().unwrap());
         let grant = i32::from_le_bytes(data[grant_off..grant_off + 4].try_into().unwrap());
         // Structural verification: plausible money, and the June-ish due
-        // date sits right after the loan amount.
-        let due_day = u16::from_le_bytes(
-            data[loan_off + LOAN_DUE_DATE..loan_off + LOAN_DUE_DATE + 2]
-                .try_into()
-                .unwrap(),
-        );
-        let due_year = u16::from_le_bytes(
-            data[loan_off + LOAN_DUE_DATE + 2..loan_off + LOAN_DUE_DATE + 4]
-                .try_into()
-                .unwrap(),
-        );
+        // date sits right after the loan amount with the start date after it.
+        let date_ok = |off: usize, years: std::ops::RangeInclusive<u16>| {
+            let day = u16::from_le_bytes(data[off..off + 2].try_into().unwrap());
+            let year = u16::from_le_bytes(data[off + 2..off + 4].try_into().unwrap());
+            (140..=170).contains(&day) && years.contains(&year)
+        };
         if !(1_000_000..=0x4000_0000).contains(&loan) || !(0..=0x4000_0000).contains(&grant) {
             continue;
         }
-        if !(140..=170).contains(&due_day) || !(2024..=2100).contains(&due_year) {
+        if !date_ok(loan_off + LOAN_DUE_DATE, 2024..=2100)
+            || !date_ok(loan_off + LOAN_START_DATE, 2000..=2026)
+        {
             continue;
         }
         out.push(DebtCluster {
@@ -79,6 +79,27 @@ pub fn clusters_in(data: &[u8], base: u64, balance: i32) -> Vec<DebtCluster> {
         });
     }
     out
+}
+
+/// The game keeps every real copy of the debts in sync, so the true
+/// (loan, grant) pair is the one the majority agrees on. Strays with other
+/// values are scan coincidences (UI caches echoing the amounts, stale
+/// snapshots) — drop them, and drop everything when no pair reaches two
+/// copies (a single "copy" is not trustworthy enough to write to).
+pub fn majority_clusters(mut clusters: Vec<DebtCluster>) -> Vec<DebtCluster> {
+    use std::collections::HashMap;
+    let mut counts: HashMap<(i32, i32), usize> = HashMap::new();
+    for c in &clusters {
+        *counts.entry((c.loan, c.grant)).or_default() += 1;
+    }
+    let Some((_, best)) = counts.iter().max_by_key(|(_, n)| **n) else {
+        return Vec::new();
+    };
+    if *best < 2 {
+        return Vec::new();
+    }
+    clusters.retain(|c| counts[&(c.loan, c.grant)] == *best);
+    clusters
 }
 
 fn find_from(data: &[u8], needle: &[u8], from: usize) -> Option<usize> {
@@ -105,7 +126,7 @@ pub fn find_debt_clusters(fm: &FmProcess, balance: i32) -> Vec<DebtCluster> {
         };
         out.extend(clusters_in(&data, base, balance));
     }
-    out
+    majority_clusters(out)
 }
 
 // ─── egui plumbing (same pattern as overlay.rs) ──────────────────────────────
@@ -170,6 +191,10 @@ mod tests {
             .copy_from_slice(&152u16.to_le_bytes());
         buf[loan_at + LOAN_DUE_DATE + 2..loan_at + LOAN_DUE_DATE + 4]
             .copy_from_slice(&2030u16.to_le_bytes());
+        buf[loan_at + LOAN_START_DATE..loan_at + LOAN_START_DATE + 2]
+            .copy_from_slice(&152u16.to_le_bytes());
+        buf[loan_at + LOAN_START_DATE + 2..loan_at + LOAN_START_DATE + 4]
+            .copy_from_slice(&2022u16.to_le_bytes());
 
         // A decoy: same balance value but no valid structure after it.
         let decoy = 0x40;
@@ -187,6 +212,29 @@ mod tests {
         );
         // A different balance finds nothing.
         assert!(clusters_in(&buf, 0x1000, 1).is_empty());
+    }
+
+    #[test]
+    fn majority_keeps_the_synced_pair_and_drops_coincidences() {
+        let cluster = |loan: i32, grant: i32| DebtCluster {
+            loan_addr: 0x1000,
+            grant_addr: 0xC00,
+            loan,
+            grant,
+        };
+        // Three real copies agree; two strays disagree; a lone pair is not
+        // trustworthy at all.
+        let real = cluster(149_509_056, 78_118_144);
+        let mixed = vec![
+            real,
+            real,
+            real,
+            cluster(149_509_056, 0),
+            cluster(1, 2),
+        ];
+        assert_eq!(majority_clusters(mixed), vec![real, real, real]);
+        assert!(majority_clusters(vec![cluster(1, 2)]).is_empty());
+        assert!(majority_clusters(Vec::new()).is_empty());
     }
 
     #[test]
