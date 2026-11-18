@@ -316,6 +316,29 @@ pub(super) fn worker_loop(
                 }
             }
 
+            BridgeCmd::ResolveDebts { finance_addr } => {
+                if let Some(f) = &fm {
+                    // The needle must be the LIVE balance: stale panel data
+                    // would miss copies the game has since refreshed.
+                    let balance = f
+                        .read_bytes(finance_addr + 0x14, 4)
+                        .ok()
+                        .and_then(|b| <[u8; 4]>::try_from(b).ok())
+                        .map(i32::from_le_bytes);
+                    match balance {
+                        Some(balance) => {
+                            let clusters = crate::commitments::find_debt_clusters(f, balance);
+                            let _ = tx.send(BridgeResult::DebtsResolved(clusters));
+                        }
+                        None => {
+                            let _ = tx.send(BridgeResult::Error(
+                                "Finance record unreadable; reload the club and retry".into(),
+                            ));
+                        }
+                    }
+                }
+            }
+
             BridgeCmd::LoadNameIndex => {
                 let result = match (&fm, &cache) {
                     (Some(f), Some(c)) => crate::person::build_name_index(

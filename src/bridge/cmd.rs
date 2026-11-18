@@ -118,6 +118,11 @@ pub enum BridgeCmd {
     LoadStaff(u64, usize),
     LoadClub(u64, usize),
     LoadHumanManager,
+    /// Locate the opened club's debt records: reads the live balance at the
+    /// given finance sub-record address, then full-heap-scans for the packed
+    /// commitment copies that embed it (see `commitments.rs`). Slow (seconds);
+    /// only sent on explicit user action.
+    ResolveDebts { finance_addr: u64 },
     /// Read-only scan of the shared name records people point at.
     LoadNameIndex,
     /// Read-only preparation; never writes or mutates the displayed club buffer.
@@ -153,9 +158,13 @@ pub enum BridgeResult {
     ),
     /// The loaded save's display name for this PID, found by scanning the
     /// game's heap. Sent after `Connected`/`Attached` (or immediately when
-    /// the same save identity was seen before); `None` when no name could
-    /// be matched. Bind it to the PID it names.
+    /// the same save identity was seen before); `None` when no name could be
+    /// matched. Bind it to the PID it names.
     SaveName(u32, Option<String>),
+    /// Answer to ResolveDebts: every verified copy of the opened club's
+    /// bank-loan/grant pair. Empty when the club carries no such debts or
+    /// the scan matched nothing.
+    DebtsResolved(Vec<crate::commitments::DebtCluster>),
     /// Several games are running (they all run as `fm.exe`) and no PID was
     /// given. Nothing was attached; the UI asks which one to use.
     ChooseGame(Vec<crate::process::RunningGame>),

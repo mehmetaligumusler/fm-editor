@@ -710,6 +710,17 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("Wage Budget (p/w)", "Maaş Bütçesi (haftalık)"),
         ("Wage Spend (p/w)", "Maaş Harcaması (haftalık)"),
         ("Finance data not available.", "Finans verisi mevcut değil."),
+        // Debt records (game screen "Borçlar ve Kredi Ödemeleri", witnessed
+        // 2026-11-18: Banka Kredisi / Hibe Kredisi rows).
+        ("Debts", "Borçlar"),
+        ("Load Debts", "Borçları Yükle"),
+        ("Rescan", "Yeniden Tara"),
+        ("Copies:", "Kopya sayısı:"),
+        ("Bank Loan", "Banka Kredisi"),
+        ("Grant Loan", "Hibe Kredisi"),
+        ("Scanning heap for debt records…", "Borç kayıtları için bellek taranıyor…"),
+        ("No debt records found for this club.", "Bu kulüp için borç kaydı bulunamadı."),
+        ("Copies disagree — rescan to refresh.", "Kopyalar farklı — yenilemek için yeniden tarayın."),
         (
             "Attendance sub-record not available.",
             "Seyirci alt kaydı mevcut değil.",

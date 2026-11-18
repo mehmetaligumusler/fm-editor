@@ -331,6 +331,128 @@ fn show_finance(
     if !shown {
         ui.label(ui.tr("Finance data not available."));
     }
+
+    // ── Debts (bank loan / grant): heap-scanned records outside the club
+    //    object. One edit writes every verified copy — CAS per copy, all
+    //    copies grouped into a single undoable action.
+    ui.add_space(8.0);
+    ui.strong(ui.tr("Debts"));
+    let debts = crate::commitments::published_debts(ui);
+    if debts.resolving {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(ui.tr("Scanning heap for debt records…"));
+        });
+    } else if debts.resolved && debts.clusters.is_empty() {
+        ui.label(ui.tr("No debt records found for this club."));
+        if ui.button(ui.tr("Rescan")).clicked() {
+            crate::commitments::request_resolve_debts(ui);
+        }
+    } else if !debts.clusters.is_empty() {
+        let loans: Vec<(u64, i32)> = debts
+            .clusters
+            .iter()
+            .map(|c| (c.loan_addr, c.loan))
+            .collect();
+        let grants: Vec<(u64, i32)> = debts
+            .clusters
+            .iter()
+            .map(|c| (c.grant_addr, c.grant))
+            .collect();
+        let loan_consistent = loans.windows(2).all(|w| w[0].1 == w[1].1);
+        let grant_consistent = grants.windows(2).all(|w| w[0].1 == w[1].1);
+        if !loan_consistent || !grant_consistent {
+            ui.label(
+                egui::RichText::new(ui.tr("Copies disagree — rescan to refresh."))
+                    .color(egui::Color32::from_rgb(240, 160, 80)),
+            );
+        }
+        debt_row(ui, "Bank Loan", &loans, edits, cur.factor());
+        debt_row(ui, "Grant Loan", &grants, edits, cur.factor());
+        ui.horizontal(|ui| {
+            ui.weak(format!(
+                "{} {}",
+                ui.tr("Copies:"),
+                debts.clusters.len()
+            ));
+            if ui.button(ui.tr("Rescan")).clicked() {
+                crate::commitments::request_resolve_debts(ui);
+            }
+        });
+    } else if ui.button(ui.tr("Load Debts")).clicked() {
+        crate::commitments::request_resolve_debts(ui);
+    }
+}
+
+/// One debt field across every located copy. Editing writes all copies with
+/// per-copy CAS (each carries its own old bytes), grouped into one action so
+/// Undo reverts them together.
+fn debt_row(
+    ui: &mut egui::Ui,
+    label: &'static str,
+    copies: &[(u64, i32)],
+    edits: &mut Vec<FieldEdit>,
+    factor: f64,
+) {
+    let Some(&(_, current)) = copies.first() else {
+        return;
+    };
+    let mut val = current as i64;
+    let enabled = navigation::editing_enabled(ui);
+    let cur = crate::i18n::currency(ui.ctx());
+    let money = |v: i64| {
+        format!(
+            "{} {}",
+            crate::i18n::thousands_signed(((v as f64 * factor).round()) as i64),
+            cur.symbol()
+        )
+    };
+    ui.horizontal(|ui| {
+        ui.label(ui.tr(label));
+        let changed = ui
+            .add_enabled_ui(enabled, |ui| {
+                let drag = egui::DragValue::new(&mut val)
+                    .update_while_editing(false)
+                    .range(0i64..=2_000_000_000i64)
+                    .speed(1.0)
+                    .custom_formatter(crate::i18n::signed_money_drag_formatter(factor))
+                    .custom_parser(crate::i18n::money_drag_parser(factor));
+                let changed = ui.add_sized([110.0, 22.0], drag).changed();
+                ui.weak(format!(" {}", cur.symbol()));
+                changed
+            })
+            .inner;
+        if enabled && changed {
+            let new_val = val.clamp(0, i32::MAX as i64) as i32;
+            if new_val != current {
+                let group = crate::edit_history::EditGroup::new(
+                    format!("debts:{label}"),
+                    label,
+                    money(current as i64),
+                    money(new_val as i64),
+                );
+                for &(addr, old) in copies {
+                    edits.push(FieldEdit {
+                        addr,
+                        old_raw: old.to_le_bytes().to_vec(),
+                        new_raw: new_val.to_le_bytes().to_vec(),
+                        description: format!("{label}: {} \u{2192} {}", money(old as i64), money(new_val as i64)),
+                        presentation: Some(
+                            crate::edit_history::EditPresentation::new(
+                                label,
+                                money(old as i64),
+                                money(new_val as i64),
+                            )
+                            .with_numeric_delta(new_val as i64 - old as i64),
+                        ),
+                    });
+                    if let Some(p) = edits.last_mut().and_then(|e| e.presentation.as_mut()) {
+                        p.group = Some(group.clone());
+                    }
+                }
+            }
+        }
+    });
 }
 
 fn show_stadium(

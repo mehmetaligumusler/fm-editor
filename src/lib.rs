@@ -11,6 +11,7 @@ pub mod bridge;
 pub mod cache;
 pub mod club;
 pub mod club_policy;
+pub mod commitments;
 pub mod edit_history;
 pub mod fields;
 pub mod game_date;

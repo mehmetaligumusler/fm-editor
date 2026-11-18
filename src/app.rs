@@ -190,6 +190,12 @@ pub struct FmEditorApp {
     injured_state: pages::injured_players::InjuredPlayersState,
     write_error: Option<String>,
     policy_ui: crate::ui::club_policy::PolicyUi,
+    // Debt records (bank loan / grant) resolved by the worker's heap scan
+    // for the currently opened club. Reset whenever the editing context
+    // changes; the panel asks for a rescan via commitments::request_resolve_debts.
+    debt_clusters: Vec<crate::commitments::DebtCluster>,
+    debts_resolved: bool,
+    debts_resolving: bool,
 
     // Status
     status_msg: Option<(String, Instant)>,
@@ -259,6 +265,9 @@ impl FmEditorApp {
             injured_state: Default::default(),
             write_error: None,
             policy_ui: Default::default(),
+            debt_clusters: Vec::new(),
+            debts_resolved: false,
+            debts_resolving: false,
             status_msg: None,
             entity_counts: None,
             settings,
@@ -311,6 +320,9 @@ impl FmEditorApp {
         self.club_snapshots.clear();
         self.player_snapshots.clear();
         self.staff_snapshots.clear();
+        self.debt_clusters.clear();
+        self.debts_resolved = false;
+        self.debts_resolving = false;
         self.change_history.end_session(reason);
         self.policy_ui.reset();
         self.player_comparison.clear();
@@ -400,6 +412,17 @@ impl FmEditorApp {
                     self.game_choices.clear();
                     let game = self.game_label(pid);
                     self.set_status(format!("Attached to {game} \u{2014} waiting for save"));
+                }
+                BridgeResult::DebtsResolved(clusters) => {
+                    self.debts_resolving = false;
+                    self.debts_resolved = true;
+                    let n = clusters.len();
+                    self.debt_clusters = clusters;
+                    self.set_status(if n > 0 {
+                        format!("Borç kayıtları bulundu ({n} kopya)")
+                    } else {
+                        "Bu kulüp için borç kaydı bulunamadı".into()
+                    });
                 }
                 BridgeResult::SaveName(pid, name) => {
                     // Late-arriving save name, found by the worker's heap
@@ -1469,6 +1492,34 @@ impl eframe::App for FmEditorApp {
             self.current_save_name.as_deref(),
         );
         crate::overlay::publish_entity_summaries(ctx, &entity_summaries);
+        crate::commitments::publish_debts(
+            ctx,
+            &crate::commitments::DebtsView {
+                clusters: self.debt_clusters.clone(),
+                resolved: self.debts_resolved,
+                resolving: self.debts_resolving,
+            },
+        );
+
+        // Debt-resolve request from the finance panel: hand the worker the
+        // open club's finance sub-record address; it reads the live balance
+        // itself so a stale panel snapshot cannot poison the scan needle.
+        if crate::commitments::take_resolve_request(ctx)
+            && !self.debts_resolving
+            && self.conn.is_ready()
+        {
+            let finance_addr = self.selected_club.as_ref().and_then(|c| c.finance_addr);
+            if let Some(addr) = finance_addr {
+                self.debts_resolving = true;
+                self.debt_clusters.clear();
+                self.debts_resolved = false;
+                self.bridge
+                    .send(BridgeCmd::ResolveDebts { finance_addr: addr });
+                self.set_status("Borç kayıtları taranıyor…".into());
+            } else {
+                self.set_status("Kulübün finans kaydı yok; borçlar yüklenemedi".into());
+            }
+        }
 
         // ===== Central Panel =====
         egui::CentralPanel::default().show(ctx, |ui| {
