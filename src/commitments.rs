@@ -32,11 +32,11 @@ pub struct DebtCluster {
 const BALANCE_TO_LOAN: usize = 0x49E;
 /// Byte distance from the loan amount back to the grant amount.
 const LOAN_TO_GRANT: usize = 0x3FB;
-/// Offset of the due-date u16 pair from the loan amount.
+/// Offset of the due-date u16 pair from the loan amount. The bytes after it
+/// are NOT a start date (live check 2026-11-18: every real cluster carries
+/// packed flags there, e.g. (257, 38913)) — the majority filter is what
+/// removes strays, not extra date checks.
 const LOAN_DUE_DATE: usize = 0x10;
-/// Offset of the start-date u16 pair from the loan amount (witnessed:
-/// (152, 2022) — 1 June 2022, matching the screen's BAŞLANGIÇ column).
-const LOAN_START_DATE: usize = 0x14;
 
 /// Scan one memory block for verified debt clusters. Exposed for tests.
 pub fn clusters_in(data: &[u8], base: u64, balance: i32) -> Vec<DebtCluster> {
@@ -51,24 +51,19 @@ pub fn clusters_in(data: &[u8], base: u64, balance: i32) -> Vec<DebtCluster> {
         let Some(grant_off) = loan_off.checked_sub(LOAN_TO_GRANT) else {
             continue;
         };
-        if loan_off + LOAN_START_DATE + 4 > data.len() || grant_off + 4 > data.len() {
+        if loan_off + LOAN_DUE_DATE + 4 > data.len() || grant_off + 4 > data.len() {
             continue;
         }
         let loan = i32::from_le_bytes(data[loan_off..loan_off + 4].try_into().unwrap());
         let grant = i32::from_le_bytes(data[grant_off..grant_off + 4].try_into().unwrap());
-        // Structural verification: plausible money, and the June-ish due
-        // date sits right after the loan amount with the start date after it.
-        let date_ok = |off: usize, years: std::ops::RangeInclusive<u16>| {
-            let day = u16::from_le_bytes(data[off..off + 2].try_into().unwrap());
-            let year = u16::from_le_bytes(data[off + 2..off + 4].try_into().unwrap());
-            (140..=170).contains(&day) && years.contains(&year)
-        };
+        // Structural verification: plausible money and the June-ish due
+        // date right after the loan amount.
+        let due_day = u16::from_le_bytes(data[loan_off + LOAN_DUE_DATE..loan_off + LOAN_DUE_DATE + 2].try_into().unwrap());
+        let due_year = u16::from_le_bytes(data[loan_off + LOAN_DUE_DATE + 2..loan_off + LOAN_DUE_DATE + 4].try_into().unwrap());
         if !(1_000_000..=0x4000_0000).contains(&loan) || !(0..=0x4000_0000).contains(&grant) {
             continue;
         }
-        if !date_ok(loan_off + LOAN_DUE_DATE, 2024..=2100)
-            || !date_ok(loan_off + LOAN_START_DATE, 2000..=2026)
-        {
+        if !(140..=170).contains(&due_day) || !(2024..=2100).contains(&due_year) {
             continue;
         }
         out.push(DebtCluster {
@@ -191,10 +186,10 @@ mod tests {
             .copy_from_slice(&152u16.to_le_bytes());
         buf[loan_at + LOAN_DUE_DATE + 2..loan_at + LOAN_DUE_DATE + 4]
             .copy_from_slice(&2030u16.to_le_bytes());
-        buf[loan_at + LOAN_START_DATE..loan_at + LOAN_START_DATE + 2]
-            .copy_from_slice(&152u16.to_le_bytes());
-        buf[loan_at + LOAN_START_DATE + 2..loan_at + LOAN_START_DATE + 4]
-            .copy_from_slice(&2022u16.to_le_bytes());
+        // The real clusters carry packed flags after the due date, not a
+        // start date — mirror that so the fixture stays faithful.
+        buf[loan_at + LOAN_DUE_DATE + 4..loan_at + LOAN_DUE_DATE + 8]
+            .copy_from_slice(&38913u32.to_le_bytes());
 
         // A decoy: same balance value but no valid structure after it.
         let decoy = 0x40;
