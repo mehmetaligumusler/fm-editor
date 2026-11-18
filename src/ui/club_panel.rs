@@ -154,11 +154,25 @@ fn show_overview(
     {
         field_widget::info_label(ui, "Season Tickets", v);
     }
-    if let Some(v) = schemas
+    // Social media followers (info+0xF8, u32). Verified live 2026-11-18:
+    // Beşiktaş read 1,882,019 — exactly the club overview's "Sosyal Medya
+    // Takipçileri". All-bits-set means the club has no social data; show
+    // that read-only instead of an editable 4-billion row.
+    let social = schemas
         .field("c_social_media")
-        .and_then(|f| fields::read_field_u32(club, &club.raw, &f))
-    {
-        field_widget::info_label(ui, "Social Media", v);
+        .and_then(|f| fields::read_field_u32(club, &club.raw, &f));
+    match (schemas.field("c_social_media"), social) {
+        (Some(field), Some(v)) if v != u32::MAX => {
+            if let Some((container, _)) = sub_location(schemas, "c_social_media") {
+                if let Some((buf, base)) = club.sub_record_mut(container) {
+                    if let Some(edit) = field_widget::raw_u32_edit(ui, field, buf, base) {
+                        edits.push(edit);
+                    }
+                }
+            }
+        }
+        (Some(_), Some(_)) => field_widget::info_label(ui, "Social Media", "-"),
+        _ => {}
     }
 }
 

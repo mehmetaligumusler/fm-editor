@@ -396,7 +396,7 @@ static TR_TABLE: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|
         ("Other %", "Diğer %"),
         ("Passion", "Tutku"),
         ("Role Ratings", "Görev Puanları"),
-        ("Social Media", "Sosyal Medya"),
+        ("Social Media", "Sosyal Medya Takipçileri"), // club overview term, witnessed 2026-11-18
         ("Squad Record", "Kadro Kaydı"),
         ("Squad Rotation", "Kadro Rotasyonu"),
         ("Trigger Press", "Baskı Tetikleme"),
